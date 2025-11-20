@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Môi trường ảo (nếu có)
+venv/
+env/
+
+# Database và Data
+*.db
+*.sqlite3
+*.pkl
+face_cache_edgeface_base.pkl
+vending_machine_data.db
+
+# Dữ liệu ảnh/người dùng (Từ status lúc nãy của bạn)
+core/Camera_AI/database/
+
+# File của VS Code (nếu có)
+.vscode/
+
+# File hệ thống
+.DS_Store
+
+# Environment variables
+.env

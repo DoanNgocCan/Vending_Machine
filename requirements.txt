@@ -1,0 +1,8 @@
+Flask
+spidev
+gspread
+oauth2client
+customtkinter
+CTkMessagebox
+python-dotenv
+payos
