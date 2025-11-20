@@ -14,6 +14,7 @@ env/
 *.pkl
 face_cache_edgeface_base.pkl
 vending_machine_data.db
+loi 
 
 # Dữ liệu ảnh/người dùng (Từ status lúc nãy của bạn)
 core/Camera_AI/database/

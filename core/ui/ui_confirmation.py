@@ -353,6 +353,5 @@ class ConfirmationScreen(tk.Toplevel):
         self.back_btn.configure(state="normal")
 
     def _back_and_hide_keyboard(self):
-        self.controller._hide_keyboard()
         self.controller.root.deiconify()
         self.destroy()
