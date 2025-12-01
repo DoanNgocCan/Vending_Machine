@@ -19,6 +19,7 @@ class WelcomeScreen(tk.Toplevel):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
+        self.controller.stop_camera_service()
 
         self.overrideredirect(True)
         try:

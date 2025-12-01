@@ -9,6 +9,7 @@ class ThankYouScreen(tk.Toplevel):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
+        self.controller.stop_camera_service()
 
         # QUAN TRỌNG: Gọi hàm hoàn tất giao dịch của controller NGAY LẬP TỨC
         self.controller._finalize_and_sync_transaction()

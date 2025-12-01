@@ -12,6 +12,7 @@ class ConfirmationScreen(tk.Toplevel):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
+        self.controller.stop_camera_service()
 
         # Tắt taskbar để full màn hình kiosk
         controller._hide_system_taskbar()
@@ -35,7 +36,6 @@ class ConfirmationScreen(tk.Toplevel):
         # Xử lý sự kiện đóng cửa sổ
         self.protocol("WM_DELETE_WINDOW", self._back_and_hide_keyboard)
         self.bind("<Escape>", lambda e: self._back_and_hide_keyboard())
-
         # --- Giao diện chính ---
         content_frame = tk.Frame(self, width=1500, height=1000, bg="white", relief=tk.RAISED, bd=3)
         content_frame.place(relx=0.5, rely=0.5, anchor="center")

@@ -11,6 +11,7 @@ class RegisterScreen(tk.Toplevel):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
+        self.controller.stop_camera_service()
         
         controller._hide_system_taskbar()
         screen_width = self.winfo_screenwidth()

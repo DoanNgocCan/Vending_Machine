@@ -22,6 +22,7 @@ class MainView:
         self.root = root
         self.controller = controller
 
+        self.controller.stop_camera_service()
         self.root.geometry("1920x1080+0+0")
         self.root.overrideredirect(True)
         screen_width = self.root.winfo_screenwidth()

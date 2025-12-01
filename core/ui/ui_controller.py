@@ -60,6 +60,7 @@ class AdvancedUIManager:
             # và tự khởi động luồng webcam (daemon)
             self.camera_ai_system = FaceRecognitionSystemWebcam()
             print("UI_INIT: Hệ thống AI Camera đã sẵn sàng.")
+            self.stop_camera_service()
         except FileNotFoundError as e:
             print(f"LỖI NGHIÊM TRỌNG: Không tìm thấy file model: {e}")
             messagebox.showerror("Lỗi AI", f"Không tìm thấy file model AI: {e}\nVui lòng kiểm tra thư mục 'checkpoints'. Ứng dụng sẽ thoát.")
@@ -176,7 +177,15 @@ class AdvancedUIManager:
     # ==================================================================
     # CÁC PHƯƠNG THỨC CALLBACK VÀ LOGIC (DÙNG CHUNG)
     # ==================================================================
+    def start_camera_service(self):
+        """Bật camera"""
+        if hasattr(self.camera_ai_system, "start_capture"):
+            self.camera_ai_system.start_capture()
 
+    def stop_camera_service(self):
+        """Tắt camera"""
+        if hasattr(self.camera_ai_system, "stop_capture"):
+            self.camera_ai_system.stop_capture()
     def handle_login_success(self, customer_data):
         """
         Xử lý logic chung khi đăng nhập thành công (từ bất kỳ màn hình nào).
@@ -251,13 +260,6 @@ class AdvancedUIManager:
         finally:
             # Không cần xóa captured_images_dir nữa vì thư viện AI tự xử lý
             pass
-
-        # Hàm này sẽ được gọi từ AIFaceRegistrationScreen
-        # self.root.after(0, lambda: self._on_background_task_complete(registration_data, error_message, register_window))
-        
-        # Thay vào đó, chúng ta sẽ cho AIFaceRegistrationScreen tự gọi
-        # _on_background_task_complete sau khi nó hoàn tất.
-        # Hàm này chỉ để chạy luồng đồng bộ.
         pass
     
     def _on_background_task_complete(self, registration_data, error_message, register_window):

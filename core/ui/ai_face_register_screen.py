@@ -14,6 +14,7 @@ class AIFaceRegistrationScreen(tk.Toplevel):
     def __init__(self, parent, controller, local_user_id, name, phone, dob, password, original_register_window):
         super().__init__(parent)
         self.controller = controller
+        self.controller.start_camera_service()
         
         self.local_user_id = local_user_id
         self.name = name
@@ -155,6 +156,7 @@ class AIFaceRegistrationScreen(tk.Toplevel):
 
     def _on_registration_finished(self, success):
         """(CHẠY TRÊN LUỒNG UI)"""
+        self.controller.stop_camera_service()
         if not self.winfo_exists(): return
 
         if success:
@@ -184,6 +186,7 @@ class AIFaceRegistrationScreen(tk.Toplevel):
 
     def _abort_face_capture(self):
         """Hủy quy trình chụp và quay lại form đăng ký."""
+        self.controller.stop_camera_service()
         print("[REGISTER_AI_SCREEN] Hủy bỏ theo yêu cầu của người dùng.")
         
         # 1. Đặt cờ Hủy để dừng luồng worker và luồng preview

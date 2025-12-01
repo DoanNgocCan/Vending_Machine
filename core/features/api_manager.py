@@ -86,7 +86,7 @@ class VendingAPIManager:
         payload = {
             "total_amount": total_amount,
             "customer_info": customer_info,
-            "items": items_list
+            "items": items_list 
         }
         try:
             response = requests.post(endpoint, json=payload, headers=API_HEADERS, timeout=20)

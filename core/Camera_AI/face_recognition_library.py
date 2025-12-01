@@ -343,44 +343,55 @@ class FaceRecognitionSystemWebcam:
         
         self.image_queue = queue.Queue(maxsize=self.IMAGE_QUEUE_SIZE)
         
+        self._camera_running = False 
+        self.cap = None
         self.webcam_thread = threading.Thread(target=self._webcam_reader_thread, daemon=True)
         self.webcam_thread.start()
         
         print(f"--- Hệ thống đã sẵn sàng (Queue size: {self.IMAGE_QUEUE_SIZE}) ---")
 
     def _webcam_reader_thread(self):
-        print("[WEBCAM] Đang mở webcam...")
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            print("[WEBCAM] Lỗi: Không thể mở webcam.")
-            return
-
         while True:
-            ret, frame = cap.read()
-            if not ret:
-                print("[WEBCAM] Lỗi: Không thể đọc frame. Thử lại...")
-                cap.release()
-                time.sleep(2)
-                cap = cv2.VideoCapture(0)
+            # Nếu có lệnh tắt -> Giải phóng camera để tắt đèn LED
+            if not self._camera_running:
+                if self.cap is not None:
+                    self.cap.release()
+                    self.cap = None
+                    self.clear_image_queue()
+                time.sleep(0.2) # Ngủ để tiết kiệm CPU
                 continue
 
-            # --- TỐI ƯU 1: LOGIC "LATEST FRAME" ---
-            # Logic này đã đúng: nếu queue đầy (size=1),
-            # nó sẽ vứt frame cũ đi để nhét frame mới vào.
-            if self.image_queue.full():
-                try: self.image_queue.get_nowait()
-                except queue.Empty: pass
-            
-            self.latest_frame_for_display = frame
-            self.image_queue.put(frame)
-            time.sleep(0.01) # Vẫn giữ sleep nhỏ để tránh lãng phí 100% CPU
+            # Nếu có lệnh bật mà chưa mở camera -> Mở camera
+            if self._camera_running and self.cap is None:
+                try:
+                    self.cap = cv2.VideoCapture(0)
+                    if not self.cap.isOpened():
+                        self._camera_running = False
+                        continue
+                except:
+                    self._camera_running = False
+                    continue
 
-        cap.release()
-        print("[WEBCAM] Đã đóng webcam.")
-
+            # Đọc ảnh như bình thường
+            if self.cap is not None and self.cap.isOpened():
+                ret, frame = self.cap.read()
+                if ret:
+                    if self.image_queue.full():
+                        try: self.image_queue.get_nowait()
+                        except queue.Empty: pass
+                    self.latest_frame_for_display = frame
+                    self.image_queue.put(frame)
+                time.sleep(0.01)
     def get_latest_frame_for_display(self):
         return self.latest_frame_for_display
-    
+    # Thêm vào trong class FaceRecognitionSystemWebcam
+    def start_capture(self):
+        if not self._camera_running:
+            self._camera_running = True
+
+    def stop_capture(self):
+        if self._camera_running:
+            self._camera_running = False    
     def clear_image_queue(self):
         while not self.image_queue.empty():
             try: self.image_queue.get_nowait()
@@ -388,6 +399,9 @@ class FaceRecognitionSystemWebcam:
         print("[QUEUE] Bộ đệm ảnh đã được dọn dẹp.")
 
     def _get_image_from_camera(self, timeout=3.0):
+        if not self._camera_running:
+            self.start_capture()
+            time.sleep(1.0) # Chờ warm-up
         try:
             # Lấy frame mới nhất từ queue
             return self.image_queue.get(timeout=timeout)

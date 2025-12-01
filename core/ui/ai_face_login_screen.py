@@ -24,7 +24,7 @@ class AIFaceLoginScreen(tk.Toplevel):
             print("[LOGIN_AI_SCREEN] Database rỗng, bỏ qua nhận diện.")
             self.after(0, self._skip_and_close)
             return 
-            
+        self.controller.start_camera_service()
         self.num_images_target = 10 
         self._recognition_capture_running = True # Cờ để hủy
 
@@ -140,6 +140,7 @@ class AIFaceLoginScreen(tk.Toplevel):
     def _handle_recognition_result(self, final_result_id):
         if self.winfo_exists():
             self.controller._on_recognition_finished(final_result_id)
+            self.controller.stop_camera_service()
             self.destroy()
 
     def _cancel_recognition(self):
@@ -149,4 +150,5 @@ class AIFaceLoginScreen(tk.Toplevel):
         # Hủy ngay lập tức (không cần chờ luồng kia)
         if self.winfo_exists():
             self.controller._on_recognition_finished(None)
+            self.controller.stop_camera_service()
             self.destroy()
