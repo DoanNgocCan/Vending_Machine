@@ -10,6 +10,7 @@ import string
 import shutil
 import threading 
 import requests
+from core.features.api_manager import DEVICE_ID, API_HEADERS, SERVER_URL
 
 DB_PATH = "vending_machine_data.db"
 
@@ -28,34 +29,38 @@ class LocalDatabaseManager:
         try:
             with self._get_connection() as con:
                 cursor = con.cursor()
-                # <<< SỬA ĐỔI: Đổi tên cột password_hash thành password >>>
+                
+                # Bảng customers
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS customers (
                         user_id TEXT PRIMARY KEY,
                         full_name TEXT NOT NULL,
                         phone_number TEXT UNIQUE NOT NULL,
                         birthday TEXT,
-                        password TEXT, -- Lưu mật khẩu dạng text thuần
+                        password TEXT,
                         points INTEGER DEFAULT 0,
                         face_encoding BLOB,
                         created_at TEXT,
                         is_synced INTEGER DEFAULT 0
                     )
                 """)
-                # ... (Các bảng khác không đổi)
+
+                # Bảng inventory local
+                # [SỬA ĐỔI] Đã bỏ cột slot_number để khớp với Server
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS inventory (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        item_name TEXT UNIQUE,  -- Thêm UNIQUE để tránh trùng tên
+                        item_name TEXT UNIQUE,
                         price REAL DEFAULT 0,
                         units_sold INTEGER DEFAULT 0,
-                        units_left INTEGER DEFAULT 0,
+                        units_left INTEGER DEFAULT 0, -- Tồn kho thực tế tại máy này
                         cost_price REAL DEFAULT 0,
                         reorder_point INTEGER DEFAULT 5,
                         description TEXT
                     )
                 """)
-                # 3. Bảng transaction_history (BẠN ĐANG THIẾU CÁI NÀY)
+                
+                # Bảng transaction_history
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS transaction_history (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,22 +73,34 @@ class LocalDatabaseManager:
                     )
                 """)
                 con.commit()
-            logging.info("Đang khởi động DB và đồng bộ 2 chiều...")
+            logging.info("DB Local khởi tạo thành công.")
             
             # 1. Nạp dữ liệu local từ Config (Dự phòng)
             self.initialize_inventory()
             
-            # 2. LUỒNG 1: Đẩy danh sách sản phẩm từ Config -> Server (Để Server có dữ liệu)
+            # 2. LUỒNG 1: Đẩy Config lên Server (Kèm số lượng để Server init kho cho máy này)
             t1 = threading.Thread(target=self.push_config_to_server, daemon=True)
             t1.start()
             
-            # 3. LUỒNG 2: Kéo bảng giá/khuyến mãi từ Server -> Client (Để cập nhật giá mới nhất nếu có)
+            # 3. LUỒNG 2: Kéo giá/tồn kho từ Server về (Để cập nhật nếu Server có thay đổi)
             t2 = threading.Thread(target=self.sync_products_from_server, daemon=True)
             t2.start()
             
         except sqlite3.Error as e:
             logging.error(f"Lỗi khi khởi tạo database: {e}", exc_info=True)
 
+    def delete_customer(self, user_id):
+        """Xóa khách hàng khỏi DB local (Dùng khi hủy đăng ký giữa chừng)."""
+        try:
+            with self._get_connection() as con:
+                con.execute("DELETE FROM customers WHERE user_id = ?", (user_id,))
+                con.commit()
+            logging.info(f"ROLLBACK: Đã xóa user {user_id} khỏi DB local do người dùng hủy.")
+            return True
+        except sqlite3.Error as e:
+            logging.error(f"Lỗi khi xóa user {user_id}: {e}")
+            return False
+        
     def register_customer(self, name, phone, dob, password, face_encoding=None):
         """
         SỬA ĐỔI: Lưu mật khẩu gốc, không mã hóa.
@@ -200,56 +217,58 @@ class LocalDatabaseManager:
     # Thêm hàm này vào trong class LocalDatabaseManager (cùng cấp với các hàm khác)
     def push_config_to_server(self):
         """
-        Tự động đọc config.py và đẩy toàn bộ danh sách sản phẩm lên Server.
-        Giúp Server luôn có dữ liệu mới nhất từ các máy con.
+        Đẩy cấu hình và tồn kho hiện tại lên Server.
+        QUAN TRỌNG: Để server khởi tạo dòng trong 'device_inventory'.
         """
         try:
+            # Lấy tồn kho thực tế từ DB Local thay vì fix cứng 50
+            current_stock = {}
+            with self._get_connection() as con:
+                rows = con.execute("SELECT item_name, units_left, price FROM inventory").fetchall()
+                for r in rows:
+                    current_stock[r['item_name']] = {'qty': r['units_left'], 'price': r['price']}
+
             from config import PRODUCT_IMAGES_CONFIG
             
-            # Chuẩn bị dữ liệu theo đúng format mà Server yêu cầu
+            sync_url = f"{SERVER_URL}/api/products/batch_sync"
             product_list = []
+            
             for key, val in PRODUCT_IMAGES_CONFIG.items():
-                # config format: "key": ("Tên", "ảnh.png", Giá)
+                name = val[0]
+                # Nếu trong DB local có thì lấy số lượng thực, không thì mặc định 50
+                qty = current_stock.get(name, {}).get('qty', 50)
+                price = current_stock.get(name, {}).get('price', val[2])
+
                 product_list.append({
-                    "name": val[0],
+                    "name": name,
                     "image": val[1],
-                    "price": val[2]
+                    "price": price,
+                    "quantity": qty, # Gửi số lượng thực tế lên
+                    "device_id": DEVICE_ID 
                 })
             
-            SERVER_URL = "https://rpi.vietseedscampaign.com/api/products/batch_sync"
+            logging.info(f"📤 Đang đẩy cấu hình kho ({len(product_list)} món) lên Server cho {DEVICE_ID}...")
             
-            logging.info(f"📤 Đang đẩy {len(product_list)} sản phẩm từ Config lên Server...")
-            
-            # Gửi request (timeout 5s để không làm chậm máy nếu mạng lag)
-            response = requests.post(SERVER_URL, json={"products": product_list}, timeout=10)
+            response = requests.post(sync_url, json={"products": product_list}, headers=API_HEADERS, timeout=10)
             
             if response.status_code == 200:
-                logging.info("✅ Đẩy sản phẩm lên Server THÀNH CÔNG.")
+                logging.info(f"✅ Đã đồng bộ kho thiết bị lên Server.")
             else:
-                logging.warning(f"⚠️ Server trả về lỗi khi đẩy sản phẩm: {response.status_code}")
+                logging.warning(f"⚠️ Server trả về lỗi khi sync config: {response.text}")
                 
-        except ImportError:
-            logging.error("❌ Không tìm thấy file config.py để đẩy dữ liệu.")
         except Exception as e:
-            logging.error(f"❌ Lỗi khi đẩy sản phẩm lên Server: {e}")        
+            logging.error(f"❌ Lỗi push_config_to_server: {e}")
     # Thêm hàm này vào trong class LocalDatabaseManager
     def sync_products_from_server(self):
         """
-        Client chủ động gọi lên Server để lấy bảng giá mới nhất dành riêng cho nó.
+        Kéo dữ liệu từ Server về.
+        Server sẽ trả về tồn kho (units_left) CỦA RIÊNG MÁY NÀY.
         """
-        # 1. ĐỊNH DANH MÁY CLIENT (Cực kỳ quan trọng)
-        # ID này phải khớp với device_id bạn đã set trên Server (bảng device_pricing)
-        MY_DEVICE_ID = "MAY_CLIENT_01" 
-        
-        SERVER_API_URL = "https://rpi.vietseedscampaign.com/api/products"
-
-        logging.info(f"🔄 Đang đồng bộ giá từ Server cho máy: {MY_DEVICE_ID}...")
+        get_url = f"{SERVER_URL}/api/products"
+        logging.info(f"🔄 Đang đồng bộ kho từ Server cho máy: {DEVICE_ID}...")
 
         try:
-            # Gửi ID máy lên header để Server biết trả về giá nào
-            headers = {'X-Device-ID': MY_DEVICE_ID}
-            
-            response = requests.get(SERVER_API_URL, headers=headers, timeout=10)
+            response = requests.get(get_url, headers=API_HEADERS, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
@@ -261,43 +280,34 @@ class LocalDatabaseManager:
                         count = 0
                         
                         for p in server_products:
-                            # Server trả về gì thì Client lưu cái đó
-                            # Dùng INSERT OR REPLACE để: 
-                            # - Nếu chưa có món đó -> Thêm mới
-                            # - Nếu có rồi -> Cập nhật giá mới (price, cost_price...)
-                            
+                            # Cập nhật Local DB theo Server
+                            # Server trả về units_left là tồn kho của máy này -> Cập nhật luôn
                             cursor.execute("""
-                                INSERT INTO inventory (item_name, price, cost_price, units_left, description, reorder_point)
-                                VALUES (?, ?, ?, ?, ?, ?)
+                                INSERT INTO inventory (item_name, price, cost_price, units_left, description)
+                                VALUES (?, ?, ?, ?, ?)
                                 ON CONFLICT(item_name) DO UPDATE SET
                                     price = excluded.price,
                                     cost_price = excluded.cost_price,
-                                    description = excluded.description,
-                                    reorder_point = excluded.reorder_point
-                                    -- Lưu ý: Không update units_left (Tồn kho) nếu bạn muốn quản lý tồn kho tại máy
-                                    -- Nếu muốn Server áp đặt tồn kho thì bỏ comment dòng dưới:
-                                    --, units_left = excluded.units_left 
+                                    units_left = excluded.units_left, -- Đồng bộ tồn kho từ Server về Local
+                                    description = excluded.description
                             """, (
                                 p['item_name'], 
                                 p['price'], 
                                 p.get('cost_price', 0), 
                                 p.get('units_left', 0), 
-                                p.get('description', ''),
-                                p.get('reorder_point', 5)
+                                p.get('description', '')
                             ))
                             count += 1
-                            
                         con.commit()
-                        logging.info(f"✅ Đã cập nhật thành công {count} sản phẩm từ Server.")
+                        logging.info(f"✅ Đã đồng bộ {count} sản phẩm và tồn kho từ Server.")
                         return True
-                else:
-                    logging.warning("⚠️ Server trả về success=False.")
             else:
                 logging.error(f"❌ Lỗi kết nối Server: {response.status_code}")
 
         except Exception as e:
-            logging.error(f"❌ Không thể đồng bộ với Server: {e}")
+            logging.error(f"❌ Lỗi sync_products_from_server: {e}")
             return False
+        
     def login_customer(self, phone, password_input):
         """
         SỬA ĐỔI: So sánh mật khẩu gốc trực tiếp.
@@ -364,23 +374,40 @@ class LocalDatabaseManager:
         rand_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
         return f"ORD-{now}-{rand_part}"
     def save_transaction(self, total_amount, customer_name_str, items_detail_str, items_sold_list):
+        """
+        Lưu giao dịch và trừ kho Local ngay lập tức (Offline logic).
+        Sau đó api_manager sẽ gửi giao dịch này lên Server để trừ kho trên Server.
+        """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         order_code = self.generate_order_code()
+        
         try:
             with self._get_connection() as con:
                 cursor = con.cursor()
-                cursor.execute("INSERT INTO transaction_history (timestamp, order_code, total_amount, customer_name, items_detail, is_synced) VALUES (?, ?, ?, ?, ?, 0)", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), order_code, total_amount, customer_name_str, items_detail_str))
+                
+                # 1. Lưu lịch sử
+                cursor.execute("""
+                    INSERT INTO transaction_history 
+                    (timestamp, order_code, total_amount, customer_name, items_detail, is_synced) 
+                    VALUES (?, ?, ?, ?, ?, 0)
+                """, (timestamp, order_code, total_amount, customer_name_str, items_detail_str))
+                
+                # 2. Trừ kho Local
                 for item in items_sold_list:
+                    # item format: {'product_name': 'Coca', 'quantity': 1}
                     cursor.execute("""
-                    UPDATE inventory 
-                    SET units_left = units_left - ?, 
-                        units_sold = units_sold + ? 
-                    WHERE item_name = ?
-                """, (item['quantity'], item['quantity'], item['product_name']))
+                        UPDATE inventory 
+                        SET units_left = units_left - ?, 
+                            units_sold = units_sold + ? 
+                        WHERE item_name = ?
+                    """, (item['quantity'], item['quantity'], item['product_name']))
+                
+                con.commit()
                 return order_code
         except sqlite3.Error as e:
-            logging.error(f"LỖI LƯU GIAO DỊCH CỤC BỘ: {e}")
-            return None 
+            logging.error(f"LỖI LƯU GIAO DỊCH LOCAL: {e}")
+            return None
+        
     def mark_transaction_as_synced(self, order_code):
         """Đánh dấu một giao dịch đã được đồng bộ thành công."""
         try:
@@ -411,15 +438,10 @@ class LocalDatabaseManager:
             logging.error(f"Lỗi khi cập nhật điểm cho user {user_id}: {e}")
             return False
     def initialize_inventory(self):
-        """
-        Nạp dữ liệu gốc từ config.py.
-        Chỉ nạp những món chưa có trong Database (dùng INSERT OR IGNORE).
-        """
+        """Nạp dữ liệu ban đầu từ Config nếu DB trống."""
         try:
-            # Import config tại đây để tránh lỗi vòng lặp
             from config import PRODUCT_IMAGES_CONFIG
         except ImportError:
-            logging.warning("Không tìm thấy config.py, bỏ qua bước khởi tạo dự phòng.")
             return
 
         try:
@@ -427,23 +449,21 @@ class LocalDatabaseManager:
                 cursor = con.cursor()
                 count = 0
                 for key, (name, image_file, default_price) in PRODUCT_IMAGES_CONFIG.items():
-                    # Dùng INSERT OR IGNORE:
-                    # Nếu tên món hàng đã có (do Server đồng bộ trước đó) -> BỎ QUA
-                    # Nếu chưa có (máy mới tinh) -> THÊM VÀO
+                    # Mặc định tạo 50 món cho mỗi loại lúc khởi tạo lần đầu
                     cursor.execute("""
                         INSERT OR IGNORE INTO inventory 
                         (item_name, price, units_left, units_sold, cost_price, reorder_point, description)
-                        VALUES (?, ?, 0, 0, 0, 5, ?)
+                        VALUES (?, ?, 50, 0, 0, 5, ?)
                     """, (name, default_price, f"Image: {image_file}"))
                     
                     if cursor.rowcount > 0:
                         count += 1
-                
                 con.commit()
                 if count > 0:
-                    logging.info(f"Khởi tạo dự phòng: Đã thêm {count} món từ Config.")
+                    logging.info(f"Initialized local inventory with {count} items.")
         except sqlite3.Error as e:
             logging.error(f"Lỗi initialize_inventory: {e}")
+
     def get_customer_by_id(self, user_id):
         if not user_id: return None
         sql = "SELECT * FROM customers WHERE user_id = ?"

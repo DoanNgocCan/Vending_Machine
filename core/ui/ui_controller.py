@@ -572,7 +572,7 @@ class AdvancedUIManager:
     def _finalize_and_sync_transaction(self):
         """
         Hàm cốt lõi: Được gọi bởi ThankYouScreen để lưu giao dịch và đồng bộ.
-        Đã sửa: Tính toán và gửi điểm mới nhất lên Server.
+        [FIXED] Tính điểm dựa trên SỐ TIỀN THỰC TRẢ = Tổng Gốc - (Ưu đãi đơn hàng lớn + Đổi điểm)
         """
         print("UI: Bắt đầu hoàn tất và đồng bộ giao dịch...")
         items_in_cart = self.logic.get_selected_items()
@@ -580,7 +580,21 @@ class AdvancedUIManager:
             print("UI WARN: Không có sản phẩm để hoàn tất giao dịch.")
             return
 
-        total_amount = self.logic.get_total_price()
+        # 1. TÍNH TOÁN CÁC LOẠI TIỀN
+        gross_total_amount = self.logic.get_total_price() # Tổng tiền gốc
+        
+        # --- A. TÍNH GIẢM GIÁ ĐƠN HÀNG LỚN (Đồng bộ logic với ui_confirmation.py) ---
+        # Logic: Nếu tổng > 20,000đ thì giảm 2,000đ
+        bulk_discount_amount = 0
+        if gross_total_amount > 20000:
+            bulk_discount_amount = 2000
+            
+        # --- B. TÍNH TIỀN ĐÃ ĐỔI ĐIỂM ---
+        points_redemption_cash_value = self.points_used_in_transaction * 100
+        
+        # --- C. TÍNH TỔNG CÁC LOẠI GIẢM GIÁ ---
+        total_discount_value = bulk_discount_amount + points_redemption_cash_value
+        
         customer_name = self.customer_name or "Khách vãng lai"
         user_id = self.customer_info.get('code') if self.customer_info else None
         product_counts = Counter(items_in_cart)
@@ -593,9 +607,9 @@ class AdvancedUIManager:
             items_sold_list_for_local_db.append({"product_name": name, "quantity": quantity})
         items_detail_str = ", ".join(items_detail_parts)
 
-        # 1. LƯU GIAO DỊCH VÀO DB LOCAL
+        # 2. LƯU GIAO DỊCH VÀO DB LOCAL (Lưu Gross Total để thống kê doanh thu gộp)
         order_code = db_manager.save_transaction(
-            total_amount, customer_name, items_detail_str, items_sold_list_for_local_db
+            gross_total_amount, customer_name, items_detail_str, items_sold_list_for_local_db
         )
         if not order_code:
             print("UI ERROR: Không thể lưu giao dịch vào DB local.")
@@ -604,19 +618,16 @@ class AdvancedUIManager:
 
         final_new_points = 0
         if user_id:
-            # --- FIX: TÍNH SỐ TIỀN THỰC TRẢ ĐỂ TÍNH ĐIỂM ---
-            # Giá trị 1 điểm = 100 VNĐ (theo logic file confirmation)
-            discount_value = self.points_used_in_transaction * 100 
-            
-            # Số tiền dùng để tính điểm thưởng = Giá gốc - Tiền được giảm
-            amount_eligible_for_reward = max(0, total_amount - discount_value)
+            # --- TÍNH SỐ TIỀN THỰC TRẢ (ĐỦ ĐIỀU KIỆN TÍNH ĐIỂM) ---
+            # Số tiền khách móc ví trả = Tổng Gốc - Tất cả giảm giá
+            amount_eligible_for_reward = max(0, gross_total_amount - total_discount_value)
 
-            print(f"DEBUG: Giá gốc: {total_amount}, Giảm: {discount_value}, Tính điểm trên: {amount_eligible_for_reward}")
+            print(f"DEBUG POINT CALC: Gốc={gross_total_amount}, GiảmĐơnLớn={bulk_discount_amount}, ĐổiĐiểm={points_redemption_cash_value}")
+            print(f"DEBUG POINT CALC: Số tiền dùng tính điểm = {amount_eligible_for_reward}")
 
-            # Truyền amount_eligible_for_reward vào thay vì total_amount
+            # Truyền số tiền thực trả vào để tính điểm tích lũy
             db_manager.update_customer_points(user_id, self.points_used_in_transaction, amount_eligible_for_reward)
             
-            # Lấy lại thông tin user từ DB Local để có số điểm chính xác nhất
             updated_user_data = db_manager.get_customer_by_id(user_id)
             if updated_user_data:
                 final_new_points = updated_user_data['points']
@@ -624,33 +635,40 @@ class AdvancedUIManager:
             
             print(f"UI: Đã cập nhật điểm Local. Điểm mới: {final_new_points}")
 
-        # 3. ĐỒNG BỘ LÊN SERVER (NỀN) - GỬI KÈM ĐIỂM MỚI
+        # 3. ĐỒNG BỘ LÊN SERVER
         def sync_transaction_task():
             print(f"SYNC: Bắt đầu đồng bộ đơn hàng {order_code} lên server...")
-            final_api_items = [{'product_id': pid, 'quantity': count} for pid, count in product_counts.items()]
+            final_api_items = []
+            for pid, count in product_counts.items():
+                product_name_config = PRODUCT_IMAGES_CONFIG.get(pid, (pid, "", 0))[0]
+                final_api_items.append({
+                    'product_name': product_name_config,
+                    'product_id': pid,                   
+                    'quantity': count
+                })
             
-            # Chuẩn bị thông tin khách hàng gửi lên API
             customer_info_for_api = None
             if self.customer_info and user_id:
                 customer_info_for_api = {
                     "user_id": user_id,
                     "name": self.customer_name,
-                    "new_total_points": final_new_points  # <--- QUAN TRỌNG: Server cần field này để update
+                    "new_total_points": final_new_points 
                 }
 
+            # Gửi Gross Total lên server
             success = self.api_manager.report_transaction(
-                total_amount, final_api_items, customer_info_for_api
+                gross_total_amount, final_api_items, customer_info_for_api
             )
             
             if success:
-                print(f"SYNC: Đồng bộ đơn hàng {order_code} và cập nhật điểm lên server THÀNH CÔNG.")
+                print(f"SYNC: Đồng bộ đơn hàng {order_code} thành công.")
                 db_manager.mark_transaction_as_synced(order_code)
             else:
-                print(f"SYNC: Đồng bộ đơn hàng {order_code} THẤT BẠI. Sẽ thử lại sau.")
+                print(f"SYNC: Đồng bộ đơn hàng {order_code} THẤT BẠI.")
                 
         threading.Thread(target=sync_transaction_task, daemon=True).start()
 
-        # 4. ĐIỀU KHIỂN LED
+        # 4. ĐIỀU KHIỂN PHẦN CỨNG
         try:
             from core.drivers.PCF8574T import show_payment_leds
             purchased_products_list = list(items_in_cart)
@@ -658,7 +676,6 @@ class AdvancedUIManager:
         except Exception as e:
             print(f"I2C ERROR: {e}")
             
-        # 5. ĐIỀU KHIỂN MÁY CƠ KHÍ
         try:
             from core.drivers.VendingMotors import dispense_products
             dispense_products(items_in_cart)

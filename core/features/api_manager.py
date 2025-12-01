@@ -1,25 +1,33 @@
-# --- START OF FILE core/features/api_manager.py (Đã cập nhật) ---
+# --- START OF FILE core/features/api_manager.py (Updated for Multi-Client) ---
 import requests
 import logging 
 from datetime import datetime
 
-# Đảm bảo IP và Port là chính xác
-SERVER_URL = "https://rpi.vietseedscampaign.com"  # Dùng IP của server nếu chạy trên máy khác
+# --- CẤU HÌNH ---
+SERVER_URL = "https://rpi.vietseedscampaign.com"
+# QUAN TRỌNG: Đây là tên định danh của máy này. Mỗi máy phải có ID khác nhau.
+DEVICE_ID = "VENDING_MACHINE_01" 
+
 API_HEADERS = {
     'Content-Type': 'application/json',
-    'X-Device-ID': 'VENDING_001' # Thêm header này nếu server yêu cầu
+    'X-Device-ID': DEVICE_ID  # Server sẽ dựa vào đây để biết trừ kho máy nào
 }
 
 class VendingAPIManager:
     def get_all_products(self):
+        """
+        Lấy danh sách sản phẩm và tồn kho dành riêng cho máy này.
+        """
         endpoint = f"{SERVER_URL}/api/products"
         try:
+            # Header đã có X-Device-ID, Server sẽ trả về đúng tồn kho của máy này
             response = requests.get(endpoint, headers=API_HEADERS, timeout=15)
             response.raise_for_status()
             data = response.json()
             if data.get("success"):
-                logging.info(f"API: Lấy thành công {len(data['products'])} sản phẩm.")
-                return {p['product_id']: p for p in data['products']}
+                logging.info(f"API: Lấy thành công {len(data['products'])} sản phẩm cho thiết bị {DEVICE_ID}.")
+                # Trả về dict với key là item_name để dễ truy xuất
+                return {p['item_name']: p for p in data['products']}
             return None
         except requests.RequestException as e:
             logging.error(f"API: Lỗi mạng khi lấy sản phẩm: {e}")
@@ -33,7 +41,6 @@ class VendingAPIManager:
                 data = response.json()
                 if data.get("success"):
                     return data.get('user')
-            # Trả về None nếu user không tồn tại (404) hoặc có lỗi
             return None
         except requests.RequestException:
             return None
@@ -58,35 +65,35 @@ class VendingAPIManager:
         except requests.RequestException as e:
             logging.error(f"API: Lỗi mạng khi đăng ký: {e}")
             return None
+
     def login_customer(self, phone_number, password):
-        """
-        Gửi yêu cầu đăng nhập đến server.
-        API: POST /api/user/login
-        """
         endpoint = f"{SERVER_URL}/api/user/login"
         payload = {"phone_number": phone_number, "password": password}
         try:
             response = requests.post(endpoint, json=payload, headers=API_HEADERS, timeout=15)
-            # API trả về 200 OK nếu thành công, 401 Unauthorized nếu thất bại
             if response.status_code == 200:
                 data = response.json()
                 if data.get("success"):
                     logging.info(f"API: Đăng nhập thành công cho SĐT {phone_number}")
-                    return data.get('user')  # Trả về object user chứa user_id, full_name, points
+                    return data.get('user')
             
-            # Các trường hợp khác (status code khác 200 hoặc success=false) đều là thất bại
-            logging.warning(f"API: Đăng nhập thất bại. Status: {response.status_code}, Body: {response.text}")
+            logging.warning(f"API: Đăng nhập thất bại. Status: {response.status_code}")
             return None
         except requests.RequestException as e:
             logging.error(f"API: Lỗi mạng khi đăng nhập: {e}")
             return None
 
     def report_transaction(self, total_amount, items_list, customer_info=None):
+        """
+        Gửi giao dịch lên server.
+        Server sẽ dựa vào X-Device-ID để trừ kho trong bảng device_inventory.
+        """
         endpoint = f"{SERVER_URL}/api/transactions/record"
         payload = {
             "total_amount": total_amount,
             "customer_info": customer_info,
-            "items": items_list 
+            "items": items_list,
+            "device_id": DEVICE_ID # Gửi thêm trong body cho chắc chắn
         }
         try:
             response = requests.post(endpoint, json=payload, headers=API_HEADERS, timeout=20)

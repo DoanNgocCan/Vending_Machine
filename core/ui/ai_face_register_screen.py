@@ -15,7 +15,7 @@ class AIFaceRegistrationScreen(tk.Toplevel):
         super().__init__(parent)
         self.controller = controller
         self.controller.start_camera_service()
-        
+
         self.local_user_id = local_user_id
         self.name = name
         self.phone = phone
@@ -24,7 +24,7 @@ class AIFaceRegistrationScreen(tk.Toplevel):
         self.original_register_window = original_register_window
         
         self.ai_system = self.controller.camera_ai_system
-        self.num_images_target = 200 
+        self.num_images_target = 100 
         self._register_capture_running = True # Cờ để hủy
 
         # --- (Code UI giữ nguyên) ---

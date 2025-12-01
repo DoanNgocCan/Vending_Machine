@@ -437,7 +437,7 @@ class FaceRecognitionSystemWebcam:
     # =========================================================================
     # CHỨC NĂNG 1: ĐĂNG KÝ KHÁCH HÀNG
     # =========================================================================
-    def register_customer(self, customer_name, num_images_to_capture=200, progress_callback=None, stop_flag_check=None):
+    def register_customer(self, customer_name, num_images_to_capture=100, progress_callback=None, stop_flag_check=None):
         """
         Phiên bản Hybrid:
         - Tính toán AI (Embedding) NGAY LẬP TỨC trong vòng lặp chụp.
