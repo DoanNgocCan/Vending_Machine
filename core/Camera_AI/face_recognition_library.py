@@ -1,12 +1,3 @@
-# -*- coding: utf-8 -*-
-# File: face_recognition_webcam_local.py
-#
-# PHIÊN BẢN ĐÃ TỐI ƯU:
-# 1. Giảm độ trễ (queue.Queue(maxsize=1)).
-# 2. Tăng độ chính xác (dùng vector trung bình - centroid - khi đăng ký).
-# 3. Đồng bộ logic vector trung bình khi xây dựng lại cache.
-# 4. Sửa lỗi đường dẫn (path) bằng os.path.join và MODULE_ROOT.
-
 import os
 import cv2
 import torch
@@ -21,7 +12,6 @@ import queue
 from collections import Counter
 import mediapipe as mp
 try:
-    # --- TỐI ƯU 4 ---
     # Import tương đối, giả định backbones.py nằm cùng thư mục
     from .backbones import get_model
 except ImportError:
@@ -38,9 +28,9 @@ except ImportError:
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 MODULE_ROOT = os.path.dirname(os.path.abspath(__file__))
 
-# =========================================================================
-# CÁC CLASS LOGIC (TỪ APP_FAISS.PY VÀ MODEL.PY)
-# =========================================================================
+# ===============
+# CÁC CLASS LOGIC 
+# ===============
 
 class ModelEmbedding:
     """

@@ -1,5 +1,6 @@
 # SHOPPING_KEYPAD_APP/core/ui/confirmation_screen.py
 
+import time
 import tkinter as tk
 import customtkinter as ctk
 import requests
@@ -40,31 +41,33 @@ class ConfirmationScreen(tk.Toplevel):
         content_frame = tk.Frame(self, width=1500, height=1000, bg="white", relief=tk.RAISED, bd=3)
         content_frame.place(relx=0.5, rely=0.5, anchor="center")
         content_frame.pack_propagate(False)
-
+        cart_items = self.controller.logic.get_selected_items()
         # --- Xử lý dữ liệu giỏ hàng ---
         items_summary = {}
         self.total_price = 0
         self.items_for_api = [] # Danh sách chuẩn bị cho API
 
-        # Gom nhóm sản phẩm (Group by ID)
-        for item_id in self.controller.logic.get_selected_items():
-            name, _, price = self.controller.PRODUCT_IMAGES_CONFIG.get(item_id, ("Sản phẩm lỗi", "", 0))
-            if name in items_summary:
-                items_summary[name]["count"] += 1
-            else:
-                items_summary[name] = {"count": 1, "price": price}
-            self.total_price += price
+        for item in cart_items:
+            name = item['name']
+            qty = item['quantity']
+            # Đảm bảo ép kiểu float/int để tránh lỗi tính toán
+            price = int(item['price']) 
+            total_item_price = int(item['total'])
 
-        # Tạo danh sách item cho API (Sửa lỗi logic giá)
-        for name, data in items_summary.items():
-            # FIX: Ép kiểu int cho quantity và price (đơn giá)
-            qty = int(data["count"])
-            unit_price = int(data['price'])
-            
+            # Cộng dồn tổng tiền
+            self.total_price += total_item_price
+
+            # Chuẩn bị dữ liệu hiển thị (Mapping theo Name để hiển thị UI)
+            items_summary[name] = {
+                "count": qty, 
+                "price": price
+            }
+
+            # Chuẩn bị dữ liệu cho API
             self.items_for_api.append({
                 "name": name, 
                 "quantity": qty, 
-                "price": unit_price
+                "price": price
             })
 
         # Cấu hình giảm giá
@@ -242,7 +245,6 @@ class ConfirmationScreen(tk.Toplevel):
             self.points_frame_sum.pack_forget()
 
     def _process_final_payment(self):
-        self.controller._hide_keyboard()
         self.confirm_btn.configure(state="disabled", text="Đang xử lý...")
         self.back_btn.configure(state="disabled")
         self.error_label.configure(text="")
@@ -337,6 +339,7 @@ class ConfirmationScreen(tk.Toplevel):
             
             # Thành công
             self.controller._open_browser_kiosk_mode(payment_link)
+            time.sleep(5)  # Chờ trình duyệt mở
             self.destroy() 
             return
             

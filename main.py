@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 # File: main.py
-
 import tkinter as tk
 import threading
 import queue
@@ -17,6 +16,7 @@ from core.features.api_manager import VendingAPIManager
 from core.features.flask_QR import app, set_shared_queue, run_flask_app
 from core.features.payment_handler import check_payment_queue
 from core.features.background_sync import sync_manager
+from core.utils.system_utils import force_kill_system
 
 # --- Import driver phần cứng (với kiểm tra lỗi) ---
 try:
@@ -41,6 +41,8 @@ def main():
 
         # 1. Khởi tạo các thành phần logic cơ bản (không giao diện)
         root = tk.Tk()
+        root.bind_all("<Control-Escape>", lambda e: force_kill_system())
+        print("[SYSTEM] Đã kích hoạt phím tắt khẩn cấp: Ctrl + Esc")
         shopping_logic = ShoppingLogic()
         api_manager = VendingAPIManager()
         flask_to_tkinter_queue = queue.Queue()

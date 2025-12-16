@@ -33,6 +33,7 @@ from core.ui.ui_register import RegisterScreen
 from core.ui.ui_confirmation import ConfirmationScreen
 from core.ui.ui_thankyou import ThankYouScreen
 from core.ui.ui_main import MainView
+from core.features.background_sync import sync_manager
 
 class AdvancedUIManager:
     # --- Cấu hình (giữ nguyên) ---
@@ -86,6 +87,7 @@ class AdvancedUIManager:
         # --- Trạng thái giao diện chính ---
         self.selected_product = None
         self.selected_quantity = 1
+        self.max_available_quantity = 1
         self.quantity_var = tk.StringVar(value="1")
         self.status_message_var = tk.StringVar(value="Chọn sản phẩm để mua hàng")
         self.welcome_message_var = tk.StringVar(value="Chào mừng quý khách!")
@@ -123,7 +125,6 @@ class AdvancedUIManager:
         self._hide_system_taskbar()
         self.root.protocol("WM_DELETE_WINDOW", self.on_app_close)
         
-        
         # --- BẮT ĐẦU ỨNG DỤNG ---
         self.show_welcome_screen() # <--- Bắt đầu bằng màn hình chào mừng
 
@@ -136,9 +137,14 @@ class AdvancedUIManager:
         Hiển thị màn hình quảng cáo.
         Class WelcomeScreen sẽ tự xử lý vòng đời của nó.
         """
-        self._hide_system_taskbar()
+        
         WelcomeScreen(self.root, self)
         self.root.withdraw()
+        print("UI: Chuyển sang màn hình Welcome -> Trigger Sync Data")
+        sync_manager.trigger_sync()
+        if hasattr(self, 'main_view'):
+            print("UI_CONTROLLER: Đang cập nhật lại giá và tồn kho cho MainView...")
+            self.main_view.refresh_product_grid()
 
     def show_loading_screen(self):
         """
@@ -177,6 +183,17 @@ class AdvancedUIManager:
     # ==================================================================
     # CÁC PHƯƠNG THỨC CALLBACK VÀ LOGIC (DÙNG CHUNG)
     # ==================================================================
+    def _close_all_toplevels(self):
+        """Đóng tất cả cửa sổ con (Toplevel) để tránh chồng lấn giao diện."""
+        for widget in self.root.winfo_children():
+            if isinstance(widget, tk.Toplevel):
+                try:
+                    widget.destroy()
+                except Exception:
+                    pass
+        # Đảm bảo root được ẩn đúng cách nếu dùng Toplevel làm màn hình chính
+        self.root.withdraw()
+
     def start_camera_service(self):
         """Bật camera"""
         if hasattr(self.camera_ai_system, "start_capture"):
@@ -262,6 +279,10 @@ class AdvancedUIManager:
             pass
         pass
     
+    def get_latest_inventory(self):
+        """Hàm bridge để UI gọi lấy tồn kho từ DB"""
+        return self.db_manager.get_inventory_map()
+    
     def _on_background_task_complete(self, registration_data, error_message, register_window):
         """
         Luồng UI: Xử lý kết quả đăng ký (Được gọi bởi AIFaceRegistrationScreen).
@@ -307,16 +328,20 @@ class AdvancedUIManager:
         except Exception as e:
             print(f"Lỗi không xác định khi mở trình duyệt: {e}")
 
+    # --- TRONG FILE: core/ui/ui_controller.py ---
+
     def _hide_system_taskbar(self):
-        print("Đang tắt thanh taskbar hệ thống (pkill panel)...")
+        # print("Đang tắt thanh taskbar hệ thống (pkill panel)...") 
         try:
-            subprocess.run(['pkill', 'panel'], check=False)
+            # [SỬA ĐỔI] Dùng Popen thay vì run để KHÔNG chặn giao diện
+            subprocess.Popen(['pkill', 'panel'])
         except Exception as e:
             print(f"Lỗi khi tắt taskbar: {e}")
 
     def _show_system_taskbar(self):
         print("Đang khởi động lại thanh taskbar hệ thống (lxpanel)...")
         try:
+            # [SỬA ĐỔI] Dùng Popen thay vì run/Popen cũ để đảm bảo mượt mà
             subprocess.Popen(['lxpanel', '--profile', 'LXDE-pi'])
         except Exception as e:
             print(f"Lỗi khi bật lại taskbar: {e}")
@@ -457,9 +482,19 @@ class AdvancedUIManager:
             except: pass
         self.selected_product = product
         product_id, name, price = product
-        self.status_message_var.set(f"✅ ĐÃ CHỌN: {name} - {price:,}đ")
-        self.selected_quantity = 1
-        self.quantity_var.set("1")
+        current_inventory = self.get_latest_inventory()
+        product_data = current_inventory.get(name, {})
+        real_stock = product_data.get('qty', 0)
+        
+        self.max_available_quantity = real_stock
+        self.status_message_var.set(f"✅ ĐÃ CHỌN: {name} - {price:,}đ (Còn: {real_stock})")
+        if real_stock > 0:
+            self.selected_quantity = 1
+        else:
+            self.selected_quantity = 0
+            self.status_message_var.set(f"❌ {name} đã hết hàng!")
+            
+        self.quantity_var.set(str(self.selected_quantity))
 
     def _deselect_product(self):
         if self.selected_button and self.selected_button.winfo_exists():
@@ -473,9 +508,21 @@ class AdvancedUIManager:
         self.status_message_var.set("Chọn sản phẩm để mua hàng")
 
     def increase_quantity(self):
-        if self.selected_quantity < 99:
+        """
+        [SỬA ĐỔI] Tăng số lượng nhưng không vượt quá tồn kho.
+        """
+        if not self.selected_product:
+            return
+
+        # Kiểm tra logic: Không được tăng quá 99 VÀ không được quá tồn kho thực tế
+        if self.selected_quantity < 99 and self.selected_quantity < self.max_available_quantity:
             self.selected_quantity += 1
             self.quantity_var.set(str(self.selected_quantity))
+        elif self.selected_quantity >= self.max_available_quantity:
+            # Thông báo cho người dùng biết đã max
+            self.status_message_var.set(f"⚠️ Chỉ còn {self.max_available_quantity} sản phẩm trong máy!")
+            # Reset lại thông báo sau 2 giây
+            self.root.after(2000, lambda: self.status_message_var.set(f"Chọn số lượng cho {self.selected_product[1]}"))
 
     def decrease_quantity(self):
         if self.selected_quantity > 1:
@@ -487,23 +534,38 @@ class AdvancedUIManager:
             self.status_message_var.set("Vui lòng chọn sản phẩm trước!")
             self.root.after(3000, lambda: self.status_message_var.set("Chọn sản phẩm để mua hàng"))
             return
+        
+        # Lấy thông tin sản phẩm đang chọn
         product_id, name, price = self.selected_product
+        
+        # Kiểm tra tồn kho
+        if self.selected_quantity > self.max_available_quantity:
+             self.status_message_var.set(f"Lỗi: Không đủ hàng (Còn {self.max_available_quantity})")
+             return
+        if self.selected_quantity <= 0:
+             self.status_message_var.set("Lỗi: Số lượng không hợp lệ")
+             return
+
+        # Vòng lặp thêm sản phẩm
         for _ in range(self.selected_quantity):
             self.logic.current_entry_buffer = product_id
-            success, message, _ = self.logic.add_item_from_entry()
+            
+            # --- [SỬA] TRUYỀN GIÁ 'price' VÀO ĐÂY ---
+            success, message, _ = self.logic.add_item_from_entry(override_price=price)
+            # ----------------------------------------
+            
             if not success:
                 self.status_message_var.set(f"Lỗi: {message}")
                 self.root.after(3000, lambda: self.status_message_var.set("Chọn sản phẩm để mua hàng"))
                 return
+                
         self.update_cart_display_handler()
         self.status_message_var.set(f"Đã thêm {self.selected_quantity} {name} vào giỏ hàng!")
         self._deselect_product()
         self.root.after(3000, lambda: self.status_message_var.set("Chọn sản phẩm để mua hàng"))
 
     def update_cart_display_handler(self, temporary_message=None):
-        # === SỬA LỖI KẾT NỐI ===
-        # Truy cập các widget thông qua self.main_view
-        if not hasattr(self, 'main_view'): return # Chưa khởi tạo
+        if not hasattr(self, 'main_view'): return
         
         cart_display = self.main_view.selected_items_display
         cart_display.config(state=tk.NORMAL)
@@ -515,47 +577,48 @@ class AdvancedUIManager:
             self.root.after(TEMP_MESSAGE_DURATION, lambda: self.update_cart_display_handler())
             return
             
-        items_from_logic = self.logic.get_selected_items()
-        if not items_from_logic:
+        # --- [SỬA] TRUY CẬP TRỰC TIẾP VÀO self.logic.cart ---
+        items_in_cart = self.logic.cart 
+        # ----------------------------------------------------
+        
+        if not items_in_cart:
              cart_display.tag_configure("center", justify='center')
-             cart_display.insert(tk.END, "Chưa có sản phẩm nào\n", "center")
+             cart_display.insert(tk.END, "Giỏ hàng trống\n", "center")
         else:
-            product_count = {}
             total_price = 0
-            for item_str in items_from_logic:
-                for product_id, (name, _, price) in PRODUCT_IMAGES_CONFIG.items():
-                    if product_id == item_str:
-                        if name in product_count:
-                            product_count[name]["count"] += 1
-                        else:
-                            product_count[name] = {"count": 1, "price": price}
-                        total_price += price
-                        break
-            for name, data in product_count.items():
-                cart_display.insert(tk.END, f"{name}: {data['count']} x {data['price']:,}đ\n")
+            # Duyệt qua từng item (dạng Dict)
+            for item in items_in_cart:
+                name = item['name']
+                quantity = item['quantity']
+                price = item['price']
+                total = item['total']
+                total_price += total
+                
+                # Hiển thị chi tiết: Tên: SL x Giá
+                cart_display.insert(tk.END, f"{name}: {quantity} x {int(price):,}đ\n")
+            
             cart_display.insert(tk.END, "--------------------\n")
-            cart_display.insert(tk.END, f"Tổng cộng: {total_price:,}đ")
+            cart_display.insert(tk.END, f"Tổng cộng: {int(total_price):,}đ")
         
         cart_display.config(state=tk.DISABLED)
 
     def on_ok_handler(self):
-        """Nút "THANH TOÁN" được nhấn."""
-        if not self.logic.get_selected_items():
-            self.status_message_var.set("⚠️ Chưa có sản phẩm nào để thanh toán!")
+        """Nút THANH TOÁN"""
+        # [SỬA] Kiểm tra self.logic.cart
+        if not self.logic.cart:
+            self.status_message_var.set("⚠️ Giỏ hàng trống!")
             self.root.after(3000, lambda: self.status_message_var.set("Chọn sản phẩm để mua hàng"))
             return
         self._show_confirmation_screen()
 
     def on_clear_cart_handler(self):
-        """Nút "RESET" giỏ hàng."""
-        if not self.logic.get_selected_items():
-            self.status_message_var.set("Giỏ hàng đã trống!")
-            self.root.after(TEMP_MESSAGE_DURATION, lambda: self.status_message_var.set("Chọn sản phẩm để mua hàng"))
-            return
-        message, _ = self.logic.reset_all()
+        """Nút RESET"""
+        # [SỬA] Xóa trực tiếp self.logic.cart
+        self.logic.cart.clear()
+        
         self.update_cart_display_handler()
         self._deselect_product()
-        self.status_message_var.set("✅ Giỏ hàng đã được xóa!")
+        self.status_message_var.set("✅ Đã xóa giỏ hàng")
         self.root.after(TEMP_MESSAGE_DURATION, lambda: self.status_message_var.set("Chọn sản phẩm để mua hàng"))
 
     def update_welcome_message(self):
@@ -570,127 +633,94 @@ class AdvancedUIManager:
     # ==================================================================
 
     def _finalize_and_sync_transaction(self):
-        """
-        Hàm cốt lõi: Được gọi bởi ThankYouScreen để lưu giao dịch và đồng bộ.
-        [FIXED] Tính điểm dựa trên SỐ TIỀN THỰC TRẢ = Tổng Gốc - (Ưu đãi đơn hàng lớn + Đổi điểm)
-        """
-        print("UI: Bắt đầu hoàn tất và đồng bộ giao dịch...")
-        items_in_cart = self.logic.get_selected_items()
-        if not items_in_cart:
-            print("UI WARN: Không có sản phẩm để hoàn tất giao dịch.")
-            return
+        print("UI: Bắt đầu hoàn tất giao dịch...")
+        
+        # --- [SỬA] LẤY DỮ LIỆU TỪ self.logic.cart ---
+        items_in_cart = self.logic.cart
+        if not items_in_cart: return
 
-        # 1. TÍNH TOÁN CÁC LOẠI TIỀN
-        gross_total_amount = self.logic.get_total_price() # Tổng tiền gốc
+        # Tính tổng tiền trực tiếp từ giỏ
+        gross_total_amount = sum(item['total'] for item in items_in_cart)
+        # ---------------------------------------------
         
-        # --- A. TÍNH GIẢM GIÁ ĐƠN HÀNG LỚN (Đồng bộ logic với ui_confirmation.py) ---
-        # Logic: Nếu tổng > 20,000đ thì giảm 2,000đ
-        bulk_discount_amount = 0
-        if gross_total_amount > 20000:
-            bulk_discount_amount = 2000
-            
-        # --- B. TÍNH TIỀN ĐÃ ĐỔI ĐIỂM ---
+        # Xử lý giảm giá (Logic cũ giữ nguyên)
+        bulk_discount_amount = 2000 if gross_total_amount > 20000 else 0
         points_redemption_cash_value = self.points_used_in_transaction * 100
-        
-        # --- C. TÍNH TỔNG CÁC LOẠI GIẢM GIÁ ---
         total_discount_value = bulk_discount_amount + points_redemption_cash_value
         
         customer_name = self.customer_name or "Khách vãng lai"
         user_id = self.customer_info.get('code') if self.customer_info else None
-        product_counts = Counter(items_in_cart)
+        points_used = self.points_used_in_transaction
         
+        # Chuẩn bị dữ liệu cho DB Local
         items_detail_parts = []
         items_sold_list_for_local_db = []
-        for product_id, quantity in product_counts.items():
-            name, _, _ = PRODUCT_IMAGES_CONFIG.get(product_id, ("Sản phẩm lỗi", "", 0))
-            items_detail_parts.append(f"{name} x{quantity}")
-            items_sold_list_for_local_db.append({"product_name": name, "quantity": quantity})
+        
+        # --- [SỬA] DUYỆT QUA LIST DICT ---
+        for item in items_in_cart:
+            p_name = item['name']
+            p_qty = item['quantity']
+            # p_id = item['id'] # Nếu cần dùng ID
+            
+            items_detail_parts.append(f"{p_name} x{p_qty}")
+            items_sold_list_for_local_db.append({"product_name": p_name, "quantity": p_qty})
+        # ---------------------------------
+            
         items_detail_str = ", ".join(items_detail_parts)
 
-        # 2. LƯU GIAO DỊCH VÀO DB LOCAL (Lưu Gross Total để thống kê doanh thu gộp)
-        order_code = db_manager.save_transaction(
-            gross_total_amount, customer_name, items_detail_str, items_sold_list_for_local_db
-        )
-        if not order_code:
-            print("UI ERROR: Không thể lưu giao dịch vào DB local.")
-            return
-        print(f"UI: Giao dịch {order_code} đã được lưu vào DB local.")
+        # Worker Thread (Giữ nguyên logic luồng)
+        def transaction_worker():
+            try:
+                # 1. Lưu DB Local
+                order_code = self.db_manager.save_transaction(
+                    gross_total_amount, customer_name, items_detail_str, items_sold_list_for_local_db
+                )
+                if not order_code: return
 
-        final_new_points = 0
-        if user_id:
-            # --- TÍNH SỐ TIỀN THỰC TRẢ (ĐỦ ĐIỀU KIỆN TÍNH ĐIỂM) ---
-            # Số tiền khách móc ví trả = Tổng Gốc - Tất cả giảm giá
-            amount_eligible_for_reward = max(0, gross_total_amount - total_discount_value)
+                # Cập nhật điểm
+                final_new_points = 0
+                if user_id:
+                    eligible_amount = max(0, gross_total_amount - total_discount_value)
+                    self.db_manager.update_customer_points(user_id, points_used, eligible_amount)
+                    user = self.db_manager.get_customer_by_id(user_id)
+                    if user: final_new_points = user['points']
 
-            print(f"DEBUG POINT CALC: Gốc={gross_total_amount}, GiảmĐơnLớn={bulk_discount_amount}, ĐổiĐiểm={points_redemption_cash_value}")
-            print(f"DEBUG POINT CALC: Số tiền dùng tính điểm = {amount_eligible_for_reward}")
-
-            # Truyền số tiền thực trả vào để tính điểm tích lũy
-            db_manager.update_customer_points(user_id, self.points_used_in_transaction, amount_eligible_for_reward)
-            
-            updated_user_data = db_manager.get_customer_by_id(user_id)
-            if updated_user_data:
-                final_new_points = updated_user_data['points']
-                self.customer_info['points'] = final_new_points 
-            
-            print(f"UI: Đã cập nhật điểm Local. Điểm mới: {final_new_points}")
-
-        # 3. ĐỒNG BỘ LÊN SERVER
-        def sync_transaction_task():
-            print(f"SYNC: Bắt đầu đồng bộ đơn hàng {order_code} lên server...")
-            final_api_items = []
-            for pid, count in product_counts.items():
-                product_name_config = PRODUCT_IMAGES_CONFIG.get(pid, (pid, "", 0))[0]
-                final_api_items.append({
-                    'product_name': product_name_config,
-                    'product_id': pid,                   
-                    'quantity': count
-                })
-            
-            customer_info_for_api = None
-            if self.customer_info and user_id:
-                customer_info_for_api = {
-                    "user_id": user_id,
-                    "name": self.customer_name,
-                    "new_total_points": final_new_points 
-                }
-
-            # Gửi Gross Total lên server
-            success = self.api_manager.report_transaction(
-                gross_total_amount, final_api_items, customer_info_for_api
-            )
-            
-            if success:
-                print(f"SYNC: Đồng bộ đơn hàng {order_code} thành công.")
-                db_manager.mark_transaction_as_synced(order_code)
-            else:
-                print(f"SYNC: Đồng bộ đơn hàng {order_code} THẤT BẠI.")
+                # 2. Hardware LED
+                items_id_list = []
+                for item in items_in_cart:
+                    items_id_list.extend([item['id']] * item['quantity'])
                 
-        threading.Thread(target=sync_transaction_task, daemon=True).start()
+                try:
+                    from core.drivers.PCF8574T import show_payment_leds
+                    show_payment_leds(items_id_list)
+                except ImportError: pass
 
-        # 4. ĐIỀU KHIỂN PHẦN CỨNG
-        try:
-            from core.drivers.PCF8574T import show_payment_leds
-            purchased_products_list = list(items_in_cart)
-            show_payment_leds(purchased_products_list)
-        except Exception as e:
-            print(f"I2C ERROR: {e}")
-            
-        try:
-            from core.drivers.VendingMotors import dispense_products
-            dispense_products(items_in_cart)
-        except ImportError:
-            pass
-        except Exception as e:
-            print(f"MOTOR ERROR: {e}")
-            
+                # 3. Sync Server
+                final_api_items = []
+                for item in items_in_cart:
+                    final_api_items.append({
+                        'product_name': item['name'],
+                        'product_id': item['id'],                   
+                        'quantity': item['quantity']
+                    })
+                
+                cust_api = None
+                if user_id:
+                    cust_api = {"user_id": user_id, "name": customer_name, "new_total_points": final_new_points}
+
+                if self.api_manager.report_transaction(gross_total_amount, final_api_items, cust_api):
+                    self.db_manager.mark_transaction_as_synced(order_code)
+
+            except Exception as e:
+                print(f"WORKER ERROR: {e}")
+
+        threading.Thread(target=transaction_worker, daemon=True).start()
     def on_app_close(self, is_welcome_close=False):
         if self.is_closing:
             return
         
         print("UI: Bắt đầu quy trình đóng ứng dụng an toàn...")
         self.is_closing = True
-
         print("UI: Dừng camera handler...")
         self._cleanup_keyboard()
         self.logic.close_resources()

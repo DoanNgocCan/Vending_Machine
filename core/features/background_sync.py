@@ -1,85 +1,117 @@
-# --- START OF FILE core/features/background_sync.py ---
+# --- FILE: core/features/background_sync.py ---
 
 import threading
-import time
 import logging
+import requests # Cần import requests để bắt lỗi mạng
+import socket
 from ..database.local_database_manager import db_manager
-
-SYNC_INTERVAL = 300  # 300 giây = 5 phút
 
 class BackgroundSyncManager:
     def __init__(self):
-        self._stop_event = threading.Event()
-        self._thread = threading.Thread(target=self._run_periodic_sync, daemon=True)
-        self.is_running = False
+        # Biến cờ để kiểm tra xem có đang đồng bộ hay không
+        self._is_syncing = False
 
-    def start(self):
-        if not self.is_running:
-            print("BACKGROUND_SYNC: Starting background sync manager...")
-            self.is_running = True
-            self._thread.start()
+    def trigger_sync(self):
+        """
+        Hàm này được gọi từ UI (Main Thread).
+        Chỉ kích hoạt nếu không có tiến trình nào đang chạy.
+        """
+        if self._is_syncing:
+            print("BACKGROUND_SYNC: Tiến trình đồng bộ trước chưa xong, bỏ qua yêu cầu mới.")
+            return
 
-    def stop(self):
-        if self.is_running:
-            print("BACKGROUND_SYNC: Stopping background sync manager...")
-            self._stop_event.set()
-            try:
-                self._thread.join(timeout=5)
-            except Exception:
-                pass
-            self.is_running = False
-            print("BACKGROUND_SYNC: Stopped.")
+        # Tạo luồng daemon để chạy đồng bộ 1 lần
+        t = threading.Thread(target=self.sync_now, daemon=True)
+        t.start()
+
+    def _check_internet(self, host="8.8.8.8", port=53, timeout=3):
+        """
+        Kiểm tra nhanh kết nối internet bằng cách ping Google DNS.
+        Cách này nhanh hơn dùng requests và ít tốn tài nguyên hơn.
+        """
+        try:
+            socket.setdefaulttimeout(timeout)
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+            return True
+        except socket.error:
+            return False
 
     def sync_now(self):
         """
-        Thực hiện một lượt đồng bộ ngay lập tức.
-        Hàm này có thể được gọi từ bất kỳ đâu, ví dụ như khi khởi động.
+        Thực hiện logic đồng bộ (Chạy trong luồng phụ).
+        Có xử lý try/except để không làm crash ứng dụng khi mất mạng.
         """
-        print("BACKGROUND_SYNC: Bắt đầu một lượt đồng bộ ngay lập tức (sync_now)...")
-        try:
-            # 1. Đồng bộ khách hàng
-            self._sync_unsynced_customers()
-            
-            # 2. Đồng bộ giao dịch
-            self._sync_unsynced_transactions()
-
-            print("BACKGROUND_SYNC: Hoàn tất lượt đồng bộ ngay lập tức.")
-        except Exception as e:
-            logging.error(f"BACKGROUND_SYNC: Lỗi trong quá trình sync_now: {e}", exc_info=True)
-
-    def _run_periodic_sync(self):
-        """Hàm này chạy trong luồng nền để đồng bộ định kỳ."""
-        print(f"BACKGROUND_SYNC: Luồng đồng bộ định kỳ đã bắt đầu, sẽ chạy mỗi {SYNC_INTERVAL} giây.")
-        while not self._stop_event.is_set():
-            # Gọi hàm đồng bộ chung
-            self.sync_now()
-            
-            # Chờ cho đến chu kỳ tiếp theo
-            print(f"BACKGROUND_SYNC: Chờ {SYNC_INTERVAL} giây cho chu kỳ tiếp theo.")
-            self._stop_event.wait(SYNC_INTERVAL)
-
-    def _sync_unsynced_customers(self):
-        customers = db_manager.get_unsynced_customers()
-        if not customers:
-            print("BACKGROUND_SYNC: Không có khách hàng nào cần đồng bộ.")
+        self._is_syncing = True
+        
+        # 1. Kiểm tra mạng trước khi làm gì cả
+        if not self._check_internet():
+            print("BACKGROUND_SYNC: [CẢNH BÁO] Không có kết nối Internet. Hủy đồng bộ.")
+            self._is_syncing = False
             return
 
-        print(f"BACKGROUND_SYNC: Tìm thấy {len(customers)} khách hàng cần đồng bộ.")
+        print("BACKGROUND_SYNC: Mạng OK. Bắt đầu chu kỳ đồng bộ...")
+
+        try:
+            # --- GIAI ĐOẠN 1: Gửi dữ liệu khách hàng (Client -> Server) ---
+            # Dùng try/except riêng lẻ để lỗi phần này không chặn phần kia
+            try:
+                self._sync_unsynced_customers()
+            except Exception as e:
+                print(f"BACKGROUND_SYNC: Lỗi khi đồng bộ khách hàng: {e}")
+
+            # --- GIAI ĐOẠN 2: Cập nhật Sản phẩm & Giá (Server -> Client) ---
+            # Đây là phần quan trọng nhất để cập nhật giá
+            try:
+                print("BACKGROUND_SYNC: Đang kéo dữ liệu sản phẩm từ Server...")
+                db_manager.sync_products_from_server()
+            except Exception as e:
+                print(f"BACKGROUND_SYNC: Lỗi khi cập nhật sản phẩm: {e}")
+            
+            # --- GIAI ĐOẠN 3: Đồng bộ giao dịch (nếu cần) ---
+            try:
+                self._sync_unsynced_transactions()
+            except Exception as e:
+                print(f"BACKGROUND_SYNC: Lỗi khi đồng bộ giao dịch: {e}")
+
+            print("BACKGROUND_SYNC: Kết thúc chu kỳ đồng bộ.")
+
+        except Exception as e:
+            # Bắt lỗi không xác định khác
+            logging.error(f"BACKGROUND_SYNC: Lỗi nghiêm trọng không xác định: {e}", exc_info=True)
+        
+        finally:
+            # Luôn luôn reset cờ để lần sau có thể chạy tiếp
+            self._is_syncing = False
+
+    def _sync_unsynced_customers(self):
+        # Lấy danh sách cần sync
+        customers = db_manager.get_unsynced_customers()
+        if not customers:
+            return
+
+        print(f"BACKGROUND_SYNC: Tìm thấy {len(customers)} khách hàng cần đồng bộ...")
         for customer in customers:
-            print(f"BACKGROUND_SYNC: Đang đồng bộ khách hàng: {customer['full_name']} (ID local: {customer['user_id']})")
-            db_manager.sync_customer_to_server(
-                name=customer['full_name'],
-                phone=customer['phone_number'],
-                dob=customer['birthday'],
-                password=customer['password'],
-                user_id=customer['user_id']
-            )
-            # Không cần sleep ở đây vì sync_now chỉ chạy một lần khi gọi
-            # Hoặc khi chạy định kỳ, khoảng nghỉ 5 phút đã đủ lớn
+            try:
+                # Gọi hàm sync từng người
+                db_manager.sync_customer_to_server(
+                    name=customer['full_name'],
+                    phone=customer['phone_number'],
+                    dob=customer['birthday'],
+                    password=customer['password'],
+                    user_id=customer['user_id']
+                )
+            except requests.exceptions.RequestException as re:
+                print(f"BACKGROUND_SYNC: Lỗi mạng khi sync user {customer['user_id']}: {re}")
+                # Nếu lỗi mạng thì dừng vòng lặp ngay, không cố sync người sau làm gì
+                break 
+            except Exception as e:
+                print(f"BACKGROUND_SYNC: Lỗi dữ liệu user {customer['user_id']}: {e}")
 
     def _sync_unsynced_transactions(self):
-        # (Chưa triển khai)
         pass
 
-# Tạo một instance toàn cục
+    # Giữ lại để tương thích code cũ
+    def start(self): pass
+    def stop(self): pass
+
 sync_manager = BackgroundSyncManager()
