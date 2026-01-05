@@ -22,6 +22,7 @@ import core.Camera_AI.face_recognition_library
 from core.Camera_AI.face_recognition_library import FaceRecognitionSystemWebcam
 from core.features.shopping_logic import ShoppingLogic
 from core.database.local_database_manager import db_manager
+from core.drivers.audio_driver import AudioDriver
 from config import TEMP_MESSAGE_DURATION, IMAGE_BASE_PATH, PRODUCT_IMAGES_CONFIG, AD_IMAGES_CONFIG
 
 # --- Imports các màn hình UI đã tách ---
@@ -52,7 +53,8 @@ class AdvancedUIManager:
         self.root = root
         self.logic = shopping_logic_instance
         self.api_manager = api_manager_instance
-        
+        self.audio_driver = AudioDriver()
+
         # Thêm db_manager vào self để LoginScreen có thể truy cập
         self.db_manager = db_manager
         print("UI_INIT: Khởi tạo Hệ thống AI Camera (FaceRecognitionSystemWebcam)...")
@@ -178,6 +180,7 @@ class AdvancedUIManager:
         """
         Hiển thị màn hình cảm ơn (được gọi khi thanh toán thành công).
         """
+        self.audio_driver.play_thank_you_async(self.customer_name)
         ThankYouScreen(self.root, self)
         self.root.withdraw()
 
