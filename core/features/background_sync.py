@@ -1,10 +1,10 @@
-# --- FILE: core/features/background_sync.py ---
-
 import threading
 import logging
-import requests # Cần import requests để bắt lỗi mạng
+import requests
+import json
 import socket
 from ..database.local_database_manager import db_manager
+from core.features.api_manager import SERVER_URL, DEVICE_ID, API_HEADERS
 
 class BackgroundSyncManager:
     def __init__(self):
@@ -27,7 +27,6 @@ class BackgroundSyncManager:
     def _check_internet(self, host="8.8.8.8", port=53, timeout=3):
         """
         Kiểm tra nhanh kết nối internet bằng cách ping Google DNS.
-        Cách này nhanh hơn dùng requests và ít tốn tài nguyên hơn.
         """
         try:
             socket.setdefaulttimeout(timeout)
@@ -37,13 +36,8 @@ class BackgroundSyncManager:
             return False
 
     def sync_now(self):
-        """
-        Thực hiện logic đồng bộ (Chạy trong luồng phụ).
-        Có xử lý try/except để không làm crash ứng dụng khi mất mạng.
-        """
         self._is_syncing = True
         
-        # 1. Kiểm tra mạng trước khi làm gì cả
         if not self._check_internet():
             print("BACKGROUND_SYNC: [CẢNH BÁO] Không có kết nối Internet. Hủy đồng bộ.")
             self._is_syncing = False
@@ -52,35 +46,31 @@ class BackgroundSyncManager:
         print("BACKGROUND_SYNC: Mạng OK. Bắt đầu chu kỳ đồng bộ...")
 
         try:
-            # --- GIAI ĐOẠN 1: Gửi dữ liệu khách hàng (Client -> Server) ---
-            # Dùng try/except riêng lẻ để lỗi phần này không chặn phần kia
-            try:
-                self._sync_unsynced_customers()
-            except Exception as e:
-                print(f"BACKGROUND_SYNC: Lỗi khi đồng bộ khách hàng: {e}")
-
-            # --- GIAI ĐOẠN 2: Cập nhật Sản phẩm & Giá (Server -> Client) ---
-            # Đây là phần quan trọng nhất để cập nhật giá
-            try:
-                print("BACKGROUND_SYNC: Đang kéo dữ liệu sản phẩm từ Server...")
-                db_manager.sync_products_from_server()
-            except Exception as e:
-                print(f"BACKGROUND_SYNC: Lỗi khi cập nhật sản phẩm: {e}")
-            
-            # --- GIAI ĐOẠN 3: Đồng bộ giao dịch (nếu cần) ---
+            # --- GIAI ĐOẠN 1: Đẩy dữ liệu Local -> Server (PUSH FIRST) ---
             try:
                 self._sync_unsynced_transactions()
             except Exception as e:
                 print(f"BACKGROUND_SYNC: Lỗi khi đồng bộ giao dịch: {e}")
 
+            try:
+                self._sync_unsynced_customers()
+            except Exception as e:
+                print(f"BACKGROUND_SYNC: Lỗi khi đồng bộ khách hàng: {e}")
+
+            # --- GIAI ĐOẠN 2: Kéo dữ liệu Server -> Client (PULL LATER) ---
+            try:
+                print("BACKGROUND_SYNC: Đang kéo dữ liệu sản phẩm từ Server...")
+                if db_manager.sync_products_from_server():
+                    print("BACKGROUND_SYNC: Cập nhật sản phẩm thành công.")
+            except Exception as e:
+                print(f"BACKGROUND_SYNC: Lỗi khi cập nhật sản phẩm: {e}")
+            
             print("BACKGROUND_SYNC: Kết thúc chu kỳ đồng bộ.")
 
         except Exception as e:
-            # Bắt lỗi không xác định khác
-            logging.error(f"BACKGROUND_SYNC: Lỗi nghiêm trọng không xác định: {e}", exc_info=True)
+            logging.error(f"BACKGROUND_SYNC: Lỗi nghiêm trọng: {e}", exc_info=True)
         
         finally:
-            # Luôn luôn reset cờ để lần sau có thể chạy tiếp
             self._is_syncing = False
 
     def _sync_unsynced_customers(self):
@@ -102,16 +92,80 @@ class BackgroundSyncManager:
                 )
             except requests.exceptions.RequestException as re:
                 print(f"BACKGROUND_SYNC: Lỗi mạng khi sync user {customer['user_id']}: {re}")
-                # Nếu lỗi mạng thì dừng vòng lặp ngay, không cố sync người sau làm gì
                 break 
             except Exception as e:
                 print(f"BACKGROUND_SYNC: Lỗi dữ liệu user {customer['user_id']}: {e}")
 
-    def _sync_unsynced_transactions(self):
-        pass
+    # --- TRONG FILE: core/features/background_sync.py ---
 
-    # Giữ lại để tương thích code cũ
+    def _sync_unsynced_transactions(self):
+        transactions = db_manager.get_unsynced_transactions()
+        if not transactions:
+            return
+
+        print(f"BACKGROUND_SYNC: Tìm thấy {len(transactions)} đơn hàng offline cần đẩy lên...")
+        
+        url = f"{SERVER_URL}/api/transactions/record"
+
+        for trans in transactions:
+            try:
+                clean_items = []
+                
+                # Check list rỗng
+                if not trans['items']:
+                    # Vẫn đánh dấu sync để không bị kẹt
+                    db_manager.mark_transaction_as_synced(trans['order_code'])
+                    continue
+
+                for item in trans['items']:
+                    p_name = item.get('item_name') or item.get('product_name') or item.get('name')
+                    if not p_name: p_name = "UNKNOWN_ITEM"
+
+                    clean_items.append({
+                        "item_name": p_name,       
+                        "quantity": item.get('quantity', 1),
+                        "price": item.get('price', 0)
+                    })
+
+                # === [LOGIC MỚI: LẤY ĐIỂM TỪ CLIENT GỬI ĐI] ===
+                user_id = trans.get('customer_name') # Lấy ID khách
+                current_points_local = 0
+                
+                # Nếu là khách thành viên (không phải Guest/None), lấy điểm hiện tại
+                real_user_id = None
+                if user_id and user_id != "Guest":
+                    real_user_id = user_id
+                    current_points_local = db_manager.get_user_current_points(real_user_id)
+
+                payload = {
+                    "total_amount": trans['total_amount'],
+                    "items": clean_items,
+                    "device_id": DEVICE_ID,
+                    "customer_info": {
+                        "user_id": real_user_id,
+                        "current_points": current_points_local # <--- GỬI ĐIỂM LOCAL LÊN
+                    } 
+                }
+                
+                # Gửi request
+                json_payload = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+                headers = API_HEADERS.copy()
+                headers['Content-Type'] = 'application/json; charset=utf-8'
+
+                response = requests.post(url, data=json_payload, headers=headers, timeout=10)
+                
+                if response.status_code == 200 or response.status_code == 201:
+                    db_manager.mark_transaction_as_synced(trans['order_code'])
+                    print(f"BACKGROUND_SYNC: Đã đồng bộ đơn {trans['order_code']}. Điểm sent: {current_points_local}")
+                else:
+                    print(f"ERROR SERVER: {response.text}")
+
+            except Exception as e:
+                print(f"BACKGROUND_SYNC: Lỗi sync đơn {trans['order_code']}: {e}")
+
+    # Giữ lại để tương thích code cũ nếu có chỗ nào gọi
     def start(self): pass
     def stop(self): pass
 
+# Tạo instance global
 sync_manager = BackgroundSyncManager()

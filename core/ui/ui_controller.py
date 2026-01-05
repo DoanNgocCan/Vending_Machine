@@ -137,7 +137,8 @@ class AdvancedUIManager:
         Hiển thị màn hình quảng cáo.
         Class WelcomeScreen sẽ tự xử lý vòng đời của nó.
         """
-        
+        sync_thread = threading.Thread(target=db_manager.sync_all_users_to_server, daemon=True)
+        sync_thread.start()
         WelcomeScreen(self.root, self)
         self.root.withdraw()
         print("UI: Chuyển sang màn hình Welcome -> Trigger Sync Data")
@@ -673,7 +674,7 @@ class AdvancedUIManager:
             try:
                 # 1. Lưu DB Local
                 order_code = self.db_manager.save_transaction(
-                    gross_total_amount, customer_name, items_detail_str, items_sold_list_for_local_db
+                    gross_total_amount, user_id, items_detail_str, items_sold_list_for_local_db
                 )
                 if not order_code: return
 

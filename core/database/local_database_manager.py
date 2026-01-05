@@ -11,6 +11,7 @@ import shutil
 import threading 
 import requests
 import time
+import ast
 from core.features.api_manager import DEVICE_ID, API_HEADERS, SERVER_URL
 
 DB_PATH = "vending_machine_data.db"
@@ -77,10 +78,6 @@ class LocalDatabaseManager:
             
             # 1. Nạp dữ liệu local từ Config (Dự phòng)
             self.initialize_inventory()
-            
-            # 2. LUỒNG 1: Đẩy Config lên Server
-            t1 = threading.Thread(target=self.push_config_to_server, daemon=True)
-            t1.start()
 
         except sqlite3.Error as e:
             logging.error(f"Lỗi khi khởi tạo database: {e}", exc_info=True)
@@ -198,8 +195,65 @@ class LocalDatabaseManager:
             logging.error(f"Lỗi khi lấy map tồn kho: {e}")
         return stock_map
 
-    def push_config_to_server(self):
-        return
+    def sync_all_users_to_server(self):
+        """
+        Chạy 1 lần khi khởi động: 
+        Lấy toàn bộ khách hàng từ DB Local đẩy lên Server để đảm bảo đồng bộ dữ liệu (đặc biệt là Điểm).
+        """
+        logging.info("STARTUP SYNC: Bắt đầu đồng bộ thông tin khách hàng lên Server...")
+        
+        try:
+            # 1. Lấy toàn bộ user từ Local
+            with self._get_connection() as con:
+                users = con.execute("SELECT * FROM customers").fetchall()
+
+            if not users:
+                logging.info("STARTUP SYNC: Không có khách hàng nào để đồng bộ.")
+                return
+
+            count = 0
+            url = f"{SERVER_URL}/api/user/sync_profile"
+            
+            # Dùng Session để tái sử dụng kết nối, tăng tốc độ
+            session = requests.Session()
+            session.headers.update(API_HEADERS)
+
+            for u in users:
+                try:
+                    # Bỏ qua khách vãng lai hoặc dữ liệu rác
+                    if not u['user_id'] or u['user_id'] == 'Guest':
+                        continue
+
+                    payload = {
+                        "user_id": u['user_id'],
+                        "full_name": u['full_name'],
+                        "phone_number": u['phone_number'],
+                        "birthday": u['birthday'],
+                        "password": u['password'],
+                        "points": u['points'],     # Gửi điểm hiện tại
+                        "created_at": u['created_at']
+                    }
+                    
+                    # Gửi lên Server
+                    resp = session.post(url, json=payload, timeout=5)
+                    
+                    if resp.status_code == 200:
+                        count += 1
+                        # Đánh dấu là đã sync (nếu chưa)
+                        if u['is_synced'] == 0:
+                            with self._get_connection() as con:
+                                con.execute("UPDATE customers SET is_synced = 1 WHERE user_id = ?", (u['user_id'],))
+                                con.commit()
+                    else:
+                        logging.warning(f"STARTUP SYNC: Lỗi sync user {u['user_id']} - {resp.text}")
+                        
+                except Exception as e:
+                    logging.error(f"STARTUP SYNC: Ngoại lệ khi sync user {u['user_id']}: {e}")
+
+            logging.info(f"✅ STARTUP SYNC: Đã đồng bộ thành công {count}/{len(users)} khách hàng lên Server.")
+
+        except Exception as e:
+            logging.error(f"Lỗi luồng sync_all_users_to_server: {e}")
 
     def sync_products_from_server(self):
         """
@@ -277,6 +331,69 @@ class LocalDatabaseManager:
             logging.error(f"Lỗi DB khi đăng nhập: {e}", exc_info=True)
             return None
     
+    def update_customer_points_exact(self, user_id, new_points):
+        """Hàm này dùng để đồng bộ điểm chuẩn từ Server về (Ghi đè)"""
+        try:
+            with self._get_connection() as con:
+                con.execute("UPDATE customers SET points = ?, is_synced = 1 WHERE user_id = ?", (new_points, user_id))
+                con.commit()
+            logging.info(f"SYNC POINT: Đã cập nhật user {user_id} thành {new_points} điểm.")
+            return True
+        except sqlite3.Error as e:
+            logging.error(f"Lỗi update point user {user_id}: {e}")
+            return False
+        
+    def get_unsynced_transactions(self):
+        """Lấy danh sách đơn chưa đồng bộ. Nếu đơn lỗi, đánh dấu bỏ qua để không kẹt hệ thống."""
+        try:
+            with self._get_connection() as con:
+                rows = con.execute("SELECT * FROM transaction_history WHERE is_synced = 0").fetchall()
+                transactions = []
+                
+                # Danh sách các đơn lỗi cần đánh dấu bỏ qua ngay lập tức
+                bad_orders = []
+
+                for row in rows:
+                    t = dict(row)
+                    raw_data = t['items_detail']
+
+                    # 1. Cố gắng đọc dữ liệu
+                    try:
+                        import json
+                        # Ưu tiên JSON chuẩn
+                        t['items'] = json.loads(raw_data)
+                    except:
+                        try:
+                            # Dự phòng: Python string (cho các đơn cũ)
+                            import ast
+                            t['items'] = ast.literal_eval(raw_data)
+                        except Exception as e:
+                            # ==> ĐÂY LÀ CHỖ XỬ LÝ ĐƠN 38HA CỦA BẠN <==
+                            print(f"\n[!!!] DATA CORRUPTED: Đơn {t['order_code']} chứa dữ liệu hỏng: {raw_data}")
+                            print(f"[!!!] Bỏ qua đơn này để hệ thống tiếp tục chạy.\n")
+                            
+                            # Thêm vào danh sách đen để đánh dấu sync=1 (Skip)
+                            bad_orders.append(t['order_code'])
+                            continue 
+
+                    # 2. Kiểm tra nếu list rỗng (sau khi parse thành công nhưng không có item)
+                    if not t['items']:
+                        bad_orders.append(t['order_code'])
+                        continue
+
+                    transactions.append(t)
+                
+                # Xử lý dứt điểm các đơn hỏng (đánh dấu là đã xử lý để không lặp lại)
+                if bad_orders:
+                    for code in bad_orders:
+                        self.mark_transaction_as_synced(code) # Coi như đã sync (thực tế là skip)
+
+                return transactions
+
+        except sqlite3.Error as e:
+            logging.error(f"Lỗi khi lấy unsynced transactions: {e}")
+            return []
+        
     def add_or_update_customer_from_server(self, server_user_data):
         user_id = server_user_data.get('user_id')
         if not user_id:
@@ -310,30 +427,58 @@ class LocalDatabaseManager:
         now = datetime.now().strftime("%Y%m%d%H%M%S")
         rand_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
         return f"ORD-{now}-{rand_part}"
+    def get_user_current_points(self, user_id):
+        """Lấy số điểm hiện tại đang lưu ở Local của user"""
+        try:
+            with self._get_connection() as con:
+                row = con.execute("SELECT points FROM customers WHERE user_id = ?", (user_id,)).fetchone()
+                return row['points'] if row else 0
+        except Exception:
+            return 0
 
-    def save_transaction(self, total_amount, customer_name_str, items_detail_str, items_sold_list):
+    def save_transaction(self, total_amount, user_id, items_detail_str, items_sold_list):
+        """
+        Lưu đơn hàng vào DB Local.
+        QUAN TRỌNG: Tham số thứ 2 (user_id) phải là MÃ KHÁCH HÀNG (ví dụ: local_xxx), không phải Tên.
+        """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         order_code = self.generate_order_code()
         
+        # 1. Tự động chuyển danh sách sản phẩm thành JSON chuẩn (Tránh lỗi invalid syntax)
+        import json
+        try:
+            safe_items_json = json.dumps(items_sold_list, ensure_ascii=False)
+        except:
+            safe_items_json = "[]"
+
+        # 2. Xử lý logic mã khách hàng
+        # Nếu user_id bị None hoặc rỗng thì lưu là "Guest"
+        final_customer_id = user_id if user_id else "Guest"
+
         try:
             with self._get_connection() as con:
                 cursor = con.cursor()
                 
+                # [QUAN TRỌNG] Lưu final_customer_id vào cột customer_name
                 cursor.execute("""
                     INSERT INTO transaction_history 
                     (timestamp, order_code, total_amount, customer_name, items_detail, is_synced) 
                     VALUES (?, ?, ?, ?, ?, 0)
-                """, (timestamp, order_code, total_amount, customer_name_str, items_detail_str))
+                """, (timestamp, order_code, total_amount, final_customer_id, safe_items_json))
                 
+                # 3. Trừ kho Local (Giữ nguyên logic cũ)
                 for item in items_sold_list:
-                    cursor.execute("""
-                        UPDATE inventory 
-                        SET units_left = units_left - ?, 
-                            units_sold = units_sold + ? 
-                        WHERE item_name = ?
-                    """, (item['quantity'], item['quantity'], item['product_name']))
+                    p_name = item.get('product_name') or item.get('item_name')
+                    if p_name:
+                        cursor.execute("""
+                            UPDATE inventory 
+                            SET units_left = units_left - ?, 
+                                units_sold = units_sold + ? 
+                            WHERE item_name = ?
+                        """, (item['quantity'], item['quantity'], p_name))
                 
                 con.commit()
+                logging.info(f"Đã lưu đơn hàng {order_code} cho khách: {final_customer_id}")
                 return order_code
         except sqlite3.Error as e:
             logging.error(f"LỖI LƯU GIAO DỊCH LOCAL: {e}")
@@ -363,7 +508,7 @@ class LocalDatabaseManager:
         points_earned = int(total_amount / 1000)
         try:
             with self._get_connection() as con:
-                con.cursor().execute("UPDATE customers SET points = points - ? + ? WHERE user_id = ?", (points_used, points_earned, user_id))
+                con.cursor().execute("UPDATE customers SET points = points - ? + ?, is_synced = 0 WHERE user_id = ?", (points_used, points_earned, user_id))
             return True
         except sqlite3.Error as e:
             logging.error(f"Lỗi khi cập nhật điểm cho user {user_id}: {e}")

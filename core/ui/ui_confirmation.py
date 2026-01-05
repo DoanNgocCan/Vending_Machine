@@ -14,9 +14,6 @@ class ConfirmationScreen(tk.Toplevel):
         super().__init__(parent)
         self.controller = controller
         self.controller.stop_camera_service()
-
-        # Tắt taskbar để full màn hình kiosk
-        controller._hide_system_taskbar()
         
         self.title("Xác nhận đơn hàng")
         screen_width = self.winfo_screenwidth()
@@ -357,4 +354,5 @@ class ConfirmationScreen(tk.Toplevel):
 
     def _back_and_hide_keyboard(self):
         self.controller.root.deiconify()
+        self.controller._hide_keyboard()
         self.destroy()
