@@ -108,8 +108,8 @@ class RegisterScreen(tk.Toplevel):
         if any(char.isdigit() for char in name):
             self.message_var.set("Tên không hợp lệ.")
             return
-        if not phone.isdigit() or not (8 <= len(phone) <= 10):
-            self.message_var.set("Số điện thoại không hợp lệ.")
+        if not phone.isdigit() or not (len(phone) == 10):
+            self.message_var.set("Số điện thoại phải có 10 chữ số.")
             return
         if len(password) < 6:
             self.message_var.set("Mật khẩu phải có ít nhất 6 ký tự.")

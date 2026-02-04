@@ -73,7 +73,7 @@ class AudioDriver:
                 print(f"[AudioDriver] -> Chế độ: Khách quen ({customer_name})")
                 try:
                     short_name = customer_name.split()[-1]
-                    text = f"Thanh toán thành công. Cảm ơn quý khách {short_name} đã mua hàng."
+                    text = f"Thanh toán thành công. Cảm ơn quý khách {customer_name} đã mua hàng."
                     
                     tts = gTTS(text=text, lang='vi')
                     tts.save(voice_temp_file)
