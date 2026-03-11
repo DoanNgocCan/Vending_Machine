@@ -67,6 +67,10 @@ class BackgroundSyncManager:
             
             print("BACKGROUND_SYNC: Kết thúc chu kỳ đồng bộ.")
 
+            try:
+                db_manager.sync_all_users_from_server()
+            except Exception as e:
+                print(f"SYNC: Lỗi cập nhật khách hàng: {e}")
         except Exception as e:
             logging.error(f"BACKGROUND_SYNC: Lỗi nghiêm trọng: {e}", exc_info=True)
         
@@ -113,7 +117,6 @@ class BackgroundSyncManager:
                 
                 # Check list rỗng
                 if not trans['items']:
-                    # Vẫn đánh dấu sync để không bị kẹt
                     db_manager.mark_transaction_as_synced(trans['order_code'])
                     continue
 
@@ -127,23 +130,19 @@ class BackgroundSyncManager:
                         "price": item.get('price', 0)
                     })
 
-                # === [LOGIC MỚI: LẤY ĐIỂM TỪ CLIENT GỬI ĐI] ===
-                user_id = trans.get('customer_name') # Lấy ID khách
-                current_points_local = 0
-                
-                # Nếu là khách thành viên (không phải Guest/None), lấy điểm hiện tại
+                # Xác định khách hàng
+                user_id = trans.get('customer_name')
                 real_user_id = None
                 if user_id and user_id != "Guest":
                     real_user_id = user_id
-                    current_points_local = db_manager.get_user_current_points(real_user_id)
 
+                # ✅ Payload: CHỈ gửi thông tin giao dịch, KHÔNG gửi điểm
                 payload = {
                     "total_amount": trans['total_amount'],
                     "items": clean_items,
                     "device_id": DEVICE_ID,
                     "customer_info": {
                         "user_id": real_user_id,
-                        "current_points": current_points_local # <--- GỬI ĐIỂM LOCAL LÊN
                     } 
                 }
                 
@@ -155,8 +154,19 @@ class BackgroundSyncManager:
                 response = requests.post(url, data=json_payload, headers=headers, timeout=10)
                 
                 if response.status_code == 200 or response.status_code == 201:
+                    resp_data = response.json()
                     db_manager.mark_transaction_as_synced(trans['order_code'])
-                    print(f"BACKGROUND_SYNC: Đã đồng bộ đơn {trans['order_code']}. Điểm sent: {current_points_local}")
+                    
+                    # ✅ Cập nhật điểm từ Server về Local (Server là nguồn chân lý)
+                    if real_user_id and resp_data.get('new_points') is not None:
+                        db_manager.update_customer_points_exact(
+                            real_user_id, 
+                            resp_data['new_points']
+                        )
+                        print(f"BACKGROUND_SYNC: Đã đồng bộ đơn {trans['order_code']}. "
+                              f"Điểm mới từ Server: {resp_data['new_points']}")
+                    else:
+                        print(f"BACKGROUND_SYNC: Đã đồng bộ đơn {trans['order_code']}.")
                 else:
                     print(f"ERROR SERVER: {response.text}")
 

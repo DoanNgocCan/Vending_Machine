@@ -27,8 +27,8 @@ from config import TEMP_MESSAGE_DURATION, IMAGE_BASE_PATH, PRODUCT_IMAGES_CONFIG
 
 # --- Imports các màn hình UI đã tách ---
 from core.ui.ui_welcome import WelcomeScreen
-from .ai_face_login_screen import AIFaceLoginScreen
-from .ai_face_register_screen import AIFaceRegistrationScreen
+from core.ui.ai_face_login_screen import AIFaceLoginScreen
+from core.ui.ai_face_register_screen import AIFaceRegistrationScreen
 from core.ui.ui_login import LoginScreen
 from core.ui.ui_register import RegisterScreen
 from core.ui.ui_confirmation import ConfirmationScreen
@@ -139,8 +139,6 @@ class AdvancedUIManager:
         Hiển thị màn hình quảng cáo.
         Class WelcomeScreen sẽ tự xử lý vòng đời của nó.
         """
-        sync_thread = threading.Thread(target=db_manager.sync_all_users_to_server, daemon=True)
-        sync_thread.start()
         WelcomeScreen(self.root, self)
         self.root.withdraw()
         print("UI: Chuyển sang màn hình Welcome -> Trigger Sync Data")

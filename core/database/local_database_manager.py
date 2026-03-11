@@ -75,9 +75,6 @@ class LocalDatabaseManager:
                 """)
                 con.commit()
             logging.info("DB Local khởi tạo thành công.")
-            
-            # 1. Nạp dữ liệu local từ Config (Dự phòng)
-            self.initialize_inventory()
 
         except sqlite3.Error as e:
             logging.error(f"Lỗi khi khởi tạo database: {e}", exc_info=True)
@@ -195,65 +192,45 @@ class LocalDatabaseManager:
             logging.error(f"Lỗi khi lấy map tồn kho: {e}")
         return stock_map
 
-    def sync_all_users_to_server(self):
+    def sync_all_users_from_server(self):
         """
-        Chạy 1 lần khi khởi động: 
-        Lấy toàn bộ khách hàng từ DB Local đẩy lên Server để đảm bảo đồng bộ dữ liệu (đặc biệt là Điểm).
+        MỚI: Khi khởi động, KÉO dữ liệu khách hàng TỪ Server VỀ.
+        Server là nguồn chân lý → Client cập nhật local cho khớp.
         """
-        logging.info("STARTUP SYNC: Bắt đầu đồng bộ thông tin khách hàng lên Server...")
+        logging.info("STARTUP SYNC: Kéo dữ liệu khách hàng từ Server về...")
         
         try:
-            # 1. Lấy toàn bộ user từ Local
-            with self._get_connection() as con:
-                users = con.execute("SELECT * FROM customers").fetchall()
-
-            if not users:
-                logging.info("STARTUP SYNC: Không có khách hàng nào để đồng bộ.")
-                return
-
-            count = 0
-            url = f"{SERVER_URL}/api/user/sync_profile"
+            s = requests.Session()
+            s.trust_env = False
+            response = s.get(f"{SERVER_URL}/api/users?limit=10000", 
+                            headers=API_HEADERS, timeout=15)
             
-            # Dùng Session để tái sử dụng kết nối, tăng tốc độ
-            session = requests.Session()
-            session.headers.update(API_HEADERS)
-
-            for u in users:
-                try:
-                    # Bỏ qua khách vãng lai hoặc dữ liệu rác
-                    if not u['user_id'] or u['user_id'] == 'Guest':
-                        continue
-
-                    payload = {
-                        "user_id": u['user_id'],
-                        "full_name": u['full_name'],
-                        "phone_number": u['phone_number'],
-                        "birthday": u['birthday'],
-                        "password": u['password'],
-                        "points": u['points'],     # Gửi điểm hiện tại
-                        "created_at": u['created_at']
-                    }
-                    
-                    # Gửi lên Server
-                    resp = session.post(url, json=payload, timeout=5)
-                    
-                    if resp.status_code == 200:
+            if response.status_code == 200:
+                data = response.json()
+                server_users = data.get('users', [])
+                
+                with self._get_connection() as con:
+                    count = 0
+                    for user in server_users:
+                        con.execute("""
+                            INSERT INTO customers (user_id, full_name, phone_number, points, is_synced)
+                            VALUES (?, ?, ?, ?, 1)
+                            ON CONFLICT(user_id) DO UPDATE SET
+                                full_name = excluded.full_name,
+                                phone_number = excluded.phone_number,
+                                points = excluded.points,
+                                is_synced = 1
+                        """, (
+                            user['user_id'],
+                            user.get('full_name', ''),
+                            user.get('phone_number', ''),
+                            user.get('points', 0),
+                        ))
                         count += 1
-                        # Đánh dấu là đã sync (nếu chưa)
-                        if u['is_synced'] == 0:
-                            with self._get_connection() as con:
-                                con.execute("UPDATE customers SET is_synced = 1 WHERE user_id = ?", (u['user_id'],))
-                                con.commit()
-                    else:
-                        logging.warning(f"STARTUP SYNC: Lỗi sync user {u['user_id']} - {resp.text}")
-                        
-                except Exception as e:
-                    logging.error(f"STARTUP SYNC: Ngoại lệ khi sync user {u['user_id']}: {e}")
-
-            logging.info(f"✅ STARTUP SYNC: Đã đồng bộ thành công {count}/{len(users)} khách hàng lên Server.")
-
+                    con.commit()
+                logging.info(f"✅ Đã đồng bộ {count} khách hàng từ Server.")
         except Exception as e:
-            logging.error(f"Lỗi luồng sync_all_users_to_server: {e}")
+            logging.error(f"Lỗi sync users from server: {e}")
 
     def sync_products_from_server(self):
         """

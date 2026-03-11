@@ -1,6 +1,9 @@
 # SHOPPING_KEYPAD_APP/config.py
 
 # Cấu hình giao diện (một số có thể không dùng bởi advanced_ui_manager)
+import os
+
+
 WINDOW_TITLE = "Máy bán hàng tự động" # Tiêu đề chung
 WINDOW_GEOMETRY = "1920x1080" # Kích thước mặc định, có thể bị override
 
@@ -9,7 +12,9 @@ TEMP_MESSAGE_DURATION = 2500 # Tăng một chút cho dễ đọc
 
 # Đường dẫn đến thư mục hình ảnh (quan trọng nếu file UI không nằm cùng cấp)
 # Nếu main.py chạy từ SHOPPING_KEYPAD_APP, và images là thư mục con:
-IMAGE_BASE_PATH = "images/"
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+IMAGE_BASE_PATH = os.path.join(_BASE_DIR, "images") + os.sep
 
 # Dữ liệu sản phẩm và quảng cáo (có thể chuyển từ UI vào đây để dễ quản lý)
 AD_IMAGES_CONFIG = ["1.png", "2.png", "3.png", "4.png", "5.png", "6.png"]
