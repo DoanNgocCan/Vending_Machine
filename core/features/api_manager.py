@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 
 # --- CẤU HÌNH ---
-SERVER_URL = "http://192.168.1.13:5000"  # Thay bằng IP thật nếu server chạy trên máy khác. Giữ nguyên nếu server chạy cùng máy.
+SERVER_URL = "http://192.168.1.20:5000"  # Thay bằng IP thật nếu server chạy trên máy khác. Giữ nguyên nếu server chạy cùng máy.
 # QUAN TRỌNG: Đây là tên định danh của máy này. Mỗi máy phải có ID khác nhau.
 DEVICE_ID = "VENDING_MACHINE_01" 
 

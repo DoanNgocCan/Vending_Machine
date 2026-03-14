@@ -14,7 +14,14 @@ import time
 import ast
 from core.features.api_manager import DEVICE_ID, API_HEADERS, SERVER_URL
 
-DB_PATH = "vending_machine_data.db"
+# 1. Lấy đường dẫn thư mục hiện tại (thư mục 'database')
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 2. Lùi lại 2 cấp (database -> core -> thư mục gốc) để tới vị trí của main.py
+ROOT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
+
+# 3. Trỏ đích danh tới file database ở thư mục gốc
+DB_PATH = os.path.join(ROOT_DIR, "vending_machine_data.db")
 
 class LocalDatabaseManager:
     def __init__(self, db_path=DB_PATH):
