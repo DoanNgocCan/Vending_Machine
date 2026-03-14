@@ -16,6 +16,8 @@ from core.features.api_manager import VendingAPIManager
 from core.features.flask_QR import app, set_shared_queue, run_flask_app
 from core.features.payment_handler import check_payment_queue
 from core.features.background_sync import sync_manager
+from core.features.mqtt_client import mqtt_manager
+from core.database.local_database_manager import db_manager
 from core.utils.system_utils import force_kill_system
 
 # --- Import driver phần cứng (với kiểm tra lỗi) ---
@@ -33,6 +35,15 @@ def main():
     """
     Hàm chính, là điểm khởi đầu của toàn bộ ứng dụng.
     Nhiệm vụ: Khởi tạo và điều phối các module chính.
+
+    Thứ tự khởi động:
+        1. Khởi tạo cấu hình và thành phần logic cơ bản.
+        2. Khởi tạo driver phần cứng.
+        3. Kết nối MQTT broker (bất đồng bộ, graceful fallback).
+        4. Đồng bộ dữ liệu sản phẩm ban đầu từ server qua HTTP.
+        5. Khởi tạo giao diện người dùng với dữ liệu đã sẵn sàng.
+        6. Khởi động các dịch vụ nền (Flask, sync định kỳ, payment listener).
+        7. Chạy vòng lặp chính Tkinter.
     """
     ui_instance = None  # Khai báo trước để dùng trong khối finally
 
@@ -52,23 +63,63 @@ def main():
         if LED_AVAILABLE:
             initialize_led_controller()
 
-        # 3. Đồng bộ dữ liệu ban đầu TRƯỚC KHI UI khởi động
-        # Đảm bảo UI bắt đầu với dữ liệu mới nhất có thể.
+        # 3. Configurar MQTT uma única vez com todos os callbacks.
+        #    Use a mutable container to reference ui_instance before it is created.
+        #    Os callbacks verificam ui_ref[0] no momento da chamada, não no momento da criação.
+        ui_ref = [None]
+
+        def _mqtt_ui_refresh():
+            """Yêu cầu UI vẽ lại toàn bộ lưới sản phẩm (thread-safe qua root.after)."""
+            try:
+                view = ui_ref[0]
+                if view and hasattr(view, 'main_view') and view.main_view:
+                    root.after(0, view.main_view.refresh_product_grid)
+            except Exception as e:
+                print(f"[MQTT] Lỗi khi yêu cầu refresh UI: {e}")
+
+        def _mqtt_product_update(item_name, price, quantity):
+            """Cập nhật một sản phẩm cụ thể trên UI (thread-safe)."""
+            try:
+                view = ui_ref[0]
+                if view and hasattr(view, 'main_view') and view.main_view:
+                    root.after(0, lambda: view.main_view.update_single_product(
+                        item_name, price, quantity
+                    ))
+            except Exception as e:
+                print(f"[MQTT] Lỗi khi yêu cầu cập nhật sản phẩm '{item_name}': {e}")
+
+        mqtt_manager.setup(
+            db_manager=db_manager,
+            api_manager=api_manager,
+            ui_refresh_callback=_mqtt_ui_refresh,
+            product_update_callback=_mqtt_product_update,
+        )
+        print("[MAIN] Đang kết nối MQTT broker...")
+        mqtt_connected = mqtt_manager.connect()
+        if mqtt_connected:
+            print("[MAIN] Kết nối MQTT thành công.")
+        else:
+            print("[MAIN] Không kết nối được MQTT. Sẽ dùng HTTP polling làm fallback.")
+
+        # 4. Đồng bộ dữ liệu ban đầu TRƯỚC KHI UI khởi động
+        #    Đảm bảo UI bắt đầu với dữ liệu sản phẩm mới nhất từ server.
         print("[MAIN] Chạy đồng bộ dữ liệu ban đầu...")
         sync_manager.sync_now()
         print("[MAIN] Đồng bộ ban đầu hoàn tất.")
 
-        # 4. Khởi tạo UI Manager
-        # AdvancedUIManager sẽ tự động khởi tạo thư viện FaceRecognitionSystem bên trong nó.
-        # Đây là điểm duy nhất mà logic AI/Camera được kích hoạt.
+        # 5. Khởi tạo UI Manager
+        #    AdvancedUIManager sẽ tự động khởi tạo thư viện FaceRecognitionSystem bên trong nó.
+        #    Đây là điểm duy nhất mà logic AI/Camera được kích hoạt.
         print("[MAIN] Đang khởi tạo giao diện người dùng và hệ thống AI/Camera...")
         ui_instance = AdvancedUIManager(
             root=root,
             shopping_logic_instance=shopping_logic,
             api_manager_instance=api_manager
         )
+        # Gán ui_instance vào container để các MQTT callback có thể truy cập
+        ui_ref[0] = ui_instance
 
-        # 5. Khởi động các luồng nền hỗ trợ
+        # 6. Khởi động các luồng nền hỗ trợ
         print("[MAIN] Đang khởi động các dịch vụ nền...")
         
         # Khởi động server thanh toán Flask
@@ -81,7 +132,7 @@ def main():
         # Bắt đầu luồng lắng nghe tín hiệu thanh toán từ Flask
         check_payment_queue(root, ui_instance, shopping_logic, flask_to_tkinter_queue)
 
-        # 6. Chạy vòng lặp chính của giao diện Tkinter
+        # 7. Chạy vòng lặp chính của giao diện Tkinter
         print("[MAIN] Khởi tạo hoàn tất. Bắt đầu vòng lặp chính của ứng dụng.")
         root.mainloop()
 
@@ -94,6 +145,7 @@ def main():
         # Dọn dẹp tài nguyên khi ứng dụng thoát (dù thành công hay thất bại)
         print("[MAIN] Bắt đầu dọn dẹp tài nguyên trước khi thoát...")
         sync_manager.stop()
+        mqtt_manager.disconnect()
         
         if LED_AVAILABLE:
             close_led_controller()
