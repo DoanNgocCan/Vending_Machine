@@ -6,3 +6,4 @@ customtkinter
 CTkMessagebox
 python-dotenv
 payos
+paho-mqtt

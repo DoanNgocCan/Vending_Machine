@@ -12,6 +12,13 @@ sys.path.append(project_root)
 
 from config import IMAGE_BASE_PATH, PRODUCT_IMAGES_CONFIG
 
+# Ánh xạ từ item_name (trong DB) sang thông tin ảnh tĩnh đã cấu hình sẵn.
+# Format: { "Aquafina": ("water", "water.png", 2000), ... }
+_NAME_TO_STATIC_CONFIG = {}
+for _key, (_name, _img, _price) in PRODUCT_IMAGES_CONFIG.items():
+    _NAME_TO_STATIC_CONFIG[_name] = (_key, _img, _price)
+
+
 class MainView:
     """
     Lớp này chịu trách nhiệm xây dựng toàn bộ giao diện chính (sản phẩm, giỏ hàng)
@@ -47,8 +54,10 @@ class MainView:
         # Tiêu đề "Sản phẩm"
         tk.Label(self.product_display_frame, text="Sản phẩm", font=("Arial", 35, "bold"), bg="white").grid(row=1, column=0, columnspan=4, pady=(15, 0))
         
-        # Danh sách lưu các nút sản phẩm (để xóa đi vẽ lại khi update giá)
+        # Danh sách lưu các nút sản phẩm (để xóa đi vẽ lại khi update)
         self.product_buttons = []
+        # Dict tra cứu nút theo item_name cho cập nhật nhanh
+        self._product_btn_map = {}
 
         # [RIGHT] Khởi tạo Frame điều khiển (Giỏ hàng, Nút bấm...)
         self._init_control_panel()
@@ -147,10 +156,15 @@ class MainView:
         # Cập nhật hiển thị giỏ hàng lần đầu (nếu có dữ liệu cũ)
         self.controller.update_cart_display_handler()
 
+    # ------------------------------------------------------------------
+    # Lưới sản phẩm
+    # ------------------------------------------------------------------
+
     def refresh_product_grid(self):
         """
         Hàm QUAN TRỌNG: Xóa hết nút cũ và vẽ lại dựa trên DB mới nhất.
-        Được gọi khi MainView khởi tạo hoặc khi Controller yêu cầu update.
+        Hỗ trợ cả sản phẩm từ cấu hình tĩnh lẫn sản phẩm mới tải về từ server.
+        Được gọi khi MainView khởi tạo hoặc khi Controller/MQTT yêu cầu cập nhật.
         """
         print("[UI] Đang làm mới lưới sản phẩm từ Database Local...")
         
@@ -158,6 +172,7 @@ class MainView:
         for btn in self.product_buttons:
             btn.destroy()
         self.product_buttons.clear()
+        self._product_btn_map.clear()
 
         # 2. Lấy dữ liệu tồn kho MỚI NHẤT từ Controller -> DB Local
         try:
@@ -166,98 +181,271 @@ class MainView:
             print("[UI] Cảnh báo: Controller chưa có hàm get_latest_inventory. Dùng dữ liệu mặc định.")
             current_stock = {}
 
-        # 3. Cấu hình Layout (Sơ đồ vị trí các nút)
-        # Format: (idx, row, col, rowspan, colspan)
-        layout = [
-            (0, 2, 1, 1, 1), (1, 2, 2, 1, 1), (2, 2, 0, 2, 1), (3, 3, 1, 1, 1),
-            (4, 3, 2, 1, 1), (5, 2, 3, 2, 1), (6, 4, 0, 1, 1), (7, 4, 1, 1, 1),
-            (8, 4, 2, 1, 1), (9, 4, 3, 1, 1),
-        ]
-        
+        # 3. Xây dựng danh sách sản phẩm sẽ hiển thị.
+        #    Ưu tiên dữ liệu từ DB (server); bổ sung cấu hình tĩnh cho sản phẩm chưa có trong DB.
+        products_to_show = self._build_product_list(current_stock)
+
+        # 4. Nếu không có sản phẩm nào → hiển thị giao diện trống
+        if not products_to_show:
+            self._show_empty_state()
+            return
+
+        # 5. Xác định layout
+        layout = self._get_layout(len(products_to_show))
+
         font_sizes = {"name": 14}
         grid_padx, grid_pady = 10, 25
         img_size = (150, 200)
-        product_keys = list(PRODUCT_IMAGES_CONFIG.keys())
 
-        # 4. Vẽ lại từng nút sản phẩm
-        for idx, row, col, rowspan, colspan in layout:
-            if idx >= len(product_keys): continue
-            
-            product_id = product_keys[idx]
-            name, img_file, default_price = PRODUCT_IMAGES_CONFIG[product_id]
+        # 6. Vẽ lại từng nút sản phẩm
+        for idx, (row, col, rowspan, colspan) in enumerate(layout):
+            if idx >= len(products_to_show):
+                break
 
-            # --- LOGIC GIÁ & TỒN KHO ---
-            product_data = current_stock.get(name)
-            
-            if product_data and isinstance(product_data, dict):
-                stock_qty = product_data.get('qty', 0)
-                db_price = product_data.get('price', 0)
-                # Ưu tiên giá từ DB (đã sync), nếu chưa có thì dùng giá mặc định
-                current_price = db_price if db_price > 0 else default_price
-            else:
-                stock_qty = 0 # Hoặc 100 tùy logic bạn muốn khi chưa sync
-                current_price = default_price
-
-            is_out_of_stock = stock_qty <= 0
-
-            # Cấu hình hiển thị (Màu sắc, Trạng thái)
-            if is_out_of_stock:
-                btn_state = tk.DISABLED
-                btn_bg = "#e0e0e0" # Màu xám
-                text_color = "red"
-                status_text = f"{int(current_price):,}đ\n(HẾT)"
-            else:
-                btn_state = tk.NORMAL
-                btn_bg = "lightyellow"
-                text_color = "black"
-                status_text = f"{int(current_price):,}đ"
-
-            # Tạo nút
-            item_frame = tk.Button(
-                self.product_display_frame, bd=2, relief=tk.RAISED,
-                bg=btn_bg, activebackground=btn_bg,
-                compound=tk.TOP, state=btn_state,
-                disabledforeground=text_color
+            product_info = products_to_show[idx]
+            self._create_product_button(
+                product_info, row, col, rowspan, colspan,
+                img_size, font_sizes, grid_padx, grid_pady
             )
-            
-            # Xử lý hình ảnh (có cache để tối ưu hiệu năng)
-            display_name = name
-            display_text = f"{display_name}\n{status_text}"
-            
-            try:
-                # Thử lấy từ cache của controller trước
-                photo_img = self.controller.cached_product_images.get(product_id)
-                if not photo_img:
-                    # Nếu chưa có, load từ file và cache lại
-                    img_path = os.path.join(project_root, IMAGE_BASE_PATH, img_file)
-                    if os.path.exists(img_path):
-                        img = Image.open(img_path).resize(img_size, Image.Resampling.LANCZOS)
-                        photo_img = ImageTk.PhotoImage(img)
-                        self.controller.cached_product_images[product_id] = photo_img
-                    else:
-                        photo_img = None
-                
-                if photo_img:
-                    item_frame.config(image=photo_img, text=display_text, font=("Arial", font_sizes["name"]), fg=text_color, wraplength=140)
-                    item_frame.image = photo_img # Giữ tham chiếu
-                else:
-                    item_frame.config(text=f"[No Img]\n{display_text}")
 
-            except Exception as e:
-                print(f"Lỗi load ảnh {name}: {e}")
-                item_frame.config(text=f"Error\n{display_text}")
+        # 7. Cấu hình co giãn lưới
+        num_cols = max((col + colspan for _, col, _, colspan in layout), default=4)
+        for i in range(num_cols):
+            self.product_display_frame.grid_columnconfigure(i, weight=1)
+        for r in range(2, max((row + rowspan for row, _, rowspan, _ in layout), default=6) + 1):
+            self.product_display_frame.grid_rowconfigure(r, weight=1)
 
-            # Gán sự kiện click (chỉ khi còn hàng)
-            if not is_out_of_stock:
-                # Quan trọng: Truyền current_price mới nhất vào hàm xử lý
-                item_frame.config(command=lambda p=(product_id, name, current_price), b=item_frame: self.controller.on_product_select(p, b))
-            
-            # Đặt nút vào lưới
-            item_frame.grid(row=row, column=col, rowspan=rowspan, columnspan=colspan, padx=grid_padx, pady=grid_pady, sticky="nsew")
-            
-            # Lưu vào list để quản lý
-            self.product_buttons.append(item_frame)
+    @staticmethod
+    def _make_product_id(item_name):
+        """Tạo khóa cache cho sản phẩm từ item_name (dùng cho sản phẩm từ server không có trong cấu hình tĩnh)."""
+        return "".join(c if c.isalnum() or c in '-_' else '_' for c in item_name).lower()
 
-        # Cấu hình co giãn lưới (để các nút dàn đều đẹp mắt)
-        for i in range(4): self.product_display_frame.grid_columnconfigure(i, weight=1)
-        for row in range(2, 6): self.product_display_frame.grid_rowconfigure(row, weight=1)
+    def _build_product_list(self, current_stock):
+        """
+        Xây dựng danh sách sản phẩm để hiển thị.
+
+        Ưu tiên:
+          1. Sản phẩm trong DB (đã đồng bộ từ server).
+          2. Sản phẩm trong cấu hình tĩnh PRODUCT_IMAGES_CONFIG chưa xuất hiện trong DB.
+
+        Mỗi phần tử trả về là dict:
+            {
+                "product_id": str,    # key dùng để cache ảnh
+                "item_name": str,     # tên sản phẩm (khớp với DB)
+                "image_path": str,    # đường dẫn tuyệt đối đến ảnh (hoặc None)
+                "default_price": float,
+                "db_price": float,
+                "stock_qty": int,
+            }
+        """
+        result = []
+
+        # --- Sản phẩm từ DB (có thể bao gồm cả sản phẩm mới từ server) ---
+        for item_name, data in current_stock.items():
+            static = _NAME_TO_STATIC_CONFIG.get(item_name)
+            if static:
+                product_id, img_file, default_price = static
+                img_path = os.path.join(project_root, IMAGE_BASE_PATH, img_file)
+                if not os.path.exists(img_path):
+                    img_path = None
+            else:
+                # Sản phẩm mới từ server, không có trong cấu hình tĩnh
+                product_id = self._make_product_id(item_name)
+                img_path = data.get("image_path") or None
+                default_price = data.get("price", 0)
+
+            # Ưu tiên đường dẫn ảnh đã tải từ server nếu có
+            db_image_path = data.get("image_path")
+            if db_image_path and os.path.exists(db_image_path):
+                img_path = db_image_path
+
+            result.append({
+                "product_id": product_id,
+                "item_name": item_name,
+                "image_path": img_path,
+                "default_price": default_price,
+                "db_price": data.get("price", 0),
+                "stock_qty": data.get("qty", 0),
+            })
+
+        # --- Bổ sung sản phẩm từ cấu hình tĩnh chưa có trong DB ---
+        db_names = set(current_stock.keys())
+        for product_id, (name, img_file, default_price) in PRODUCT_IMAGES_CONFIG.items():
+            if name not in db_names:
+                img_path = os.path.join(project_root, IMAGE_BASE_PATH, img_file)
+                if not os.path.exists(img_path):
+                    img_path = None
+                result.append({
+                    "product_id": product_id,
+                    "item_name": name,
+                    "image_path": img_path,
+                    "default_price": default_price,
+                    "db_price": 0,
+                    "stock_qty": 0,
+                })
+
+        return result
+
+    def _get_layout(self, count):
+        """
+        Trả về danh sách (row, col, rowspan, colspan) cho `count` sản phẩm.
+        Dùng layout cố định cho 10 sản phẩm; layout lưới đơn giản cho các trường hợp khác.
+        """
+        if count == 10:
+            # Layout gốc tối ưu cho 10 sản phẩm
+            return [
+                (2, 1, 1, 1), (2, 2, 1, 1), (2, 0, 2, 1), (3, 1, 1, 1),
+                (3, 2, 1, 1), (2, 3, 2, 1), (4, 0, 1, 1), (4, 1, 1, 1),
+                (4, 2, 1, 1), (4, 3, 1, 1),
+            ]
+
+        # Layout lưới động: 4 cột
+        cols = 4
+        layout = []
+        for i in range(count):
+            row = 2 + (i // cols)
+            col = i % cols
+            layout.append((row, col, 1, 1))
+        return layout
+
+    def _create_product_button(self, product_info, row, col, rowspan, colspan,
+                               img_size, font_sizes, grid_padx, grid_pady):
+        """Tạo và đặt một nút sản phẩm vào lưới."""
+        product_id = product_info["product_id"]
+        item_name = product_info["item_name"]
+        img_path = product_info["image_path"]
+        default_price = product_info["default_price"]
+        db_price = product_info["db_price"]
+        stock_qty = product_info["stock_qty"]
+
+        current_price = db_price if db_price > 0 else default_price
+        is_out_of_stock = stock_qty <= 0
+
+        if is_out_of_stock:
+            btn_state = tk.DISABLED
+            btn_bg = "#e0e0e0"
+            text_color = "red"
+            status_text = f"{int(current_price):,}đ\n(HẾT)"
+        else:
+            btn_state = tk.NORMAL
+            btn_bg = "lightyellow"
+            text_color = "black"
+            status_text = f"{int(current_price):,}đ"
+
+        display_text = f"{item_name}\n{status_text}"
+
+        item_frame = tk.Button(
+            self.product_display_frame, bd=2, relief=tk.RAISED,
+            bg=btn_bg, activebackground=btn_bg,
+            compound=tk.TOP, state=btn_state,
+            disabledforeground=text_color
+        )
+
+        # Xử lý hình ảnh (có cache để tối ưu hiệu năng)
+        try:
+            photo_img = self.controller.cached_product_images.get(product_id)
+            if not photo_img and img_path and os.path.exists(img_path):
+                img = Image.open(img_path).resize(img_size, Image.Resampling.LANCZOS)
+                photo_img = ImageTk.PhotoImage(img)
+                self.controller.cached_product_images[product_id] = photo_img
+
+            if photo_img:
+                item_frame.config(image=photo_img, text=display_text,
+                                  font=("Arial", font_sizes["name"]), fg=text_color, wraplength=140)
+                item_frame.image = photo_img
+            else:
+                item_frame.config(text=f"[No Img]\n{display_text}")
+
+        except Exception as e:
+            print(f"Lỗi load ảnh {item_name}: {e}")
+            item_frame.config(text=f"Error\n{display_text}")
+
+        if not is_out_of_stock:
+            item_frame.config(
+                command=lambda p=(product_id, item_name, current_price), b=item_frame:
+                    self.controller.on_product_select(p, b)
+            )
+
+        item_frame.grid(
+            row=row, column=col,
+            rowspan=rowspan, columnspan=colspan,
+            padx=grid_padx, pady=grid_pady, sticky="nsew"
+        )
+
+        self.product_buttons.append(item_frame)
+        self._product_btn_map[item_name] = item_frame
+
+    def _show_empty_state(self):
+        """Hiển thị thông báo khi không có sản phẩm nào (server trống)."""
+        empty_label = tk.Label(
+            self.product_display_frame,
+            text="Chưa có sản phẩm nào.\nVui lòng liên hệ quản trị viên.",
+            font=("Arial", 24), bg="white", fg="#888888",
+            justify=tk.CENTER
+        )
+        empty_label.grid(row=2, column=0, columnspan=4, pady=80, sticky="nsew")
+        self.product_buttons.append(empty_label)
+
+    def update_single_product(self, item_name, price=None, quantity=None):
+        """
+        Cập nhật hiển thị của MỘT sản phẩm cụ thể mà không vẽ lại toàn bộ lưới.
+        Được gọi khi nhận được MQTT hot update (Requirement 2A).
+
+        Args:
+            item_name: Tên sản phẩm (khớp với DB).
+            price: Giá mới (None = không thay đổi).
+            quantity: Số lượng mới (None = không thay đổi).
+        """
+        btn = self._product_btn_map.get(item_name)
+        if btn is None:
+            # Sản phẩm chưa hiển thị → vẽ lại toàn bộ
+            self.refresh_product_grid()
+            return
+
+        try:
+            current_stock = self.controller.get_latest_inventory()
+        except AttributeError:
+            current_stock = {}
+
+        product_data = current_stock.get(item_name, {})
+        db_price = price if price is not None else product_data.get("price", 0)
+        stock_qty = quantity if quantity is not None else product_data.get("qty", 0)
+
+        # Tra cứu giá mặc định từ cấu hình tĩnh nếu có
+        static = _NAME_TO_STATIC_CONFIG.get(item_name)
+        default_price = static[2] if static else 0
+        current_price = db_price if db_price > 0 else default_price
+
+        is_out_of_stock = stock_qty <= 0
+        if is_out_of_stock:
+            btn_state = tk.DISABLED
+            btn_bg = "#e0e0e0"
+            text_color = "red"
+            status_text = f"{int(current_price):,}đ\n(HẾT)"
+        else:
+            btn_state = tk.NORMAL
+            btn_bg = "lightyellow"
+            text_color = "black"
+            status_text = f"{int(current_price):,}đ"
+
+        display_text = f"{item_name}\n{status_text}"
+
+        # Cập nhật nút
+        btn.config(state=btn_state, bg=btn_bg, activebackground=btn_bg,
+                   disabledforeground=text_color)
+        if btn.cget("image"):
+            btn.config(text=display_text, fg=text_color, wraplength=140)
+        else:
+            btn.config(text=f"[No Img]\n{display_text}")
+
+        # Gán lại command với giá mới
+        static_key = static[0] if static else self._make_product_id(item_name)
+        if not is_out_of_stock:
+            btn.config(
+                command=lambda p=(static_key, item_name, current_price), b=btn:
+                    self.controller.on_product_select(p, b)
+            )
+        else:
+            btn.config(command="")
+
+        print(f"[UI] Đã cập nhật sản phẩm '{item_name}': giá={current_price}, tồn kho={stock_qty}.")

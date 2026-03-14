@@ -64,9 +64,24 @@ class LocalDatabaseManager:
                         units_left INTEGER DEFAULT 0,
                         cost_price REAL DEFAULT 0,
                         reorder_point INTEGER DEFAULT 5,
-                        description TEXT
+                        description TEXT,
+                        image_path TEXT,
+                        server_product_id TEXT,
+                        updated_at TEXT
                     )
                 """)
+
+                # Migration: thêm cột mới cho DB cũ chưa có các cột này
+                for col_def in [
+                    ("image_path", "TEXT"),
+                    ("server_product_id", "TEXT"),
+                    ("updated_at", "TEXT"),
+                ]:
+                    try:
+                        cursor.execute(f"ALTER TABLE inventory ADD COLUMN {col_def[0]} {col_def[1]}")
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column name" not in str(e).lower():
+                            raise
                 
                 # Bảng transaction_history
                 cursor.execute("""
@@ -189,15 +204,92 @@ class LocalDatabaseManager:
         stock_map = {}
         try:
             with self._get_connection() as con:
-                rows = con.execute("SELECT item_name, units_left, price FROM inventory").fetchall()
+                rows = con.execute(
+                    "SELECT item_name, units_left, price, image_path, server_product_id FROM inventory"
+                ).fetchall()
                 for r in rows:
                     stock_map[r['item_name']] = {
                         'qty': r['units_left'],
-                        'price': r['price']
+                        'price': r['price'],
+                        'image_path': r['image_path'],
+                        'server_product_id': r['server_product_id'],
                     }
         except sqlite3.Error as e:
             logging.error(f"Lỗi khi lấy map tồn kho: {e}")
         return stock_map
+
+    def update_product_price_quantity(self, item_name, price=None, quantity=None):
+        """
+        Cập nhật giá và/hoặc số lượng của một sản phẩm theo item_name.
+        Dùng khi nhận được MQTT hot update từ server.
+        """
+        if price is None and quantity is None:
+            return False
+        try:
+            from datetime import datetime as _dt
+            now = _dt.now().isoformat()
+            with self._get_connection() as con:
+                if price is not None and quantity is not None:
+                    con.execute(
+                        "UPDATE inventory SET price = ?, units_left = ?, updated_at = ? WHERE item_name = ?",
+                        (price, quantity, now, item_name)
+                    )
+                elif price is not None:
+                    con.execute(
+                        "UPDATE inventory SET price = ?, updated_at = ? WHERE item_name = ?",
+                        (price, now, item_name)
+                    )
+                else:
+                    con.execute(
+                        "UPDATE inventory SET units_left = ?, updated_at = ? WHERE item_name = ?",
+                        (quantity, now, item_name)
+                    )
+                con.commit()
+            logging.info(f"DB: Đã cập nhật sản phẩm '{item_name}': giá={price}, số lượng={quantity}.")
+            return True
+        except sqlite3.Error as e:
+            logging.error(f"DB: Lỗi cập nhật sản phẩm '{item_name}': {e}")
+            return False
+
+    def upsert_product(self, product_data, local_image_path=None):
+        """
+        Thêm mới hoặc cập nhật một sản phẩm trong DB cục bộ.
+        Dùng khi nhận tín hiệu MQTT data_changed và đã tải dữ liệu đầy đủ từ server.
+        """
+        if not product_data or not product_data.get('item_name'):
+            logging.warning("DB: upsert_product nhận dữ liệu không hợp lệ.")
+            return False
+        try:
+            from datetime import datetime as _dt
+            now = _dt.now().isoformat()
+            item_name = product_data['item_name']
+            price = product_data.get('price', 0)
+            units_left = product_data.get('units_left', product_data.get('quantity', 0))
+            cost_price = product_data.get('cost_price', 0)
+            description = product_data.get('description', '')
+            server_product_id = str(product_data.get('id', ''))
+            image_path = local_image_path or product_data.get('image_path', '')
+
+            with self._get_connection() as con:
+                con.execute("""
+                    INSERT INTO inventory
+                        (item_name, price, cost_price, units_left, description, image_path, server_product_id, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(item_name) DO UPDATE SET
+                        price = excluded.price,
+                        cost_price = excluded.cost_price,
+                        units_left = excluded.units_left,
+                        description = excluded.description,
+                        image_path = excluded.image_path,
+                        server_product_id = excluded.server_product_id,
+                        updated_at = excluded.updated_at
+                """, (item_name, price, cost_price, units_left, description, image_path, server_product_id, now))
+                con.commit()
+            logging.info(f"DB: Đã upsert sản phẩm '{item_name}' (server_id={server_product_id}).")
+            return True
+        except sqlite3.Error as e:
+            logging.error(f"DB: Lỗi upsert sản phẩm '{product_data.get('item_name')}': {e}")
+            return False
 
     def sync_all_users_from_server(self):
         """
@@ -268,19 +360,25 @@ class LocalDatabaseManager:
                             if server_qty is None:
                                 server_qty = p.get('quantity', 0)
                             cursor.execute("""
-                                INSERT INTO inventory (item_name, price, cost_price, units_left, description)
-                                VALUES (?, ?, ?, ?, ?)
+                                INSERT INTO inventory (item_name, price, cost_price, units_left, description, image_path, server_product_id, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                                 ON CONFLICT(item_name) DO UPDATE SET
                                     price = excluded.price,
                                     cost_price = excluded.cost_price,
                                     units_left = excluded.units_left,
-                                    description = excluded.description
+                                    description = excluded.description,
+                                    image_path = COALESCE(excluded.image_path, inventory.image_path),
+                                    server_product_id = excluded.server_product_id,
+                                    updated_at = excluded.updated_at
                             """, (
                                 p['item_name'], 
                                 p['price'], 
                                 p.get('cost_price', 0), 
-                                p.get('units_left', 0), 
-                                p.get('description', '')
+                                server_qty, 
+                                p.get('description', ''),
+                                p.get('image_path', p.get('image_url', '')),
+                                str(p.get('id', '')),
+                                datetime.now().isoformat()
                             ))
                             count += 1
                         con.commit()

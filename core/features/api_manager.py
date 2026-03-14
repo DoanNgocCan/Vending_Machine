@@ -1,6 +1,7 @@
 # --- START OF FILE core/features/api_manager.py (Updated for Multi-Client) ---
 import requests
-import logging 
+import logging
+import os
 from datetime import datetime
 
 # --- CẤU HÌNH ---
@@ -31,6 +32,67 @@ class VendingAPIManager:
             return None
         except requests.RequestException as e:
             logging.error(f"API: Lỗi mạng khi lấy sản phẩm: {e}")
+            return None
+
+    def get_product_by_id(self, product_id):
+        """
+        Lấy thông tin đầy đủ của một sản phẩm theo ID từ server.
+        Dùng khi nhận tín hiệu MQTT data_changed để lấy dữ liệu mới nhất (bao gồm image_url).
+        """
+        endpoint = f"{SERVER_URL}/api/products/{product_id}"
+        try:
+            response = requests.get(endpoint, headers=API_HEADERS, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("success"):
+                logging.info(f"API: Lấy thành công thông tin sản phẩm ID={product_id}.")
+                return data.get('product')
+            logging.warning(f"API: Server trả về thất bại cho sản phẩm ID={product_id}: {data.get('message')}")
+            return None
+        except requests.RequestException as e:
+            logging.error(f"API: Lỗi mạng khi lấy sản phẩm ID={product_id}: {e}")
+            return None
+
+    def download_product_image(self, image_url, item_name):
+        """
+        Tải ảnh sản phẩm từ server về thư mục images/ cục bộ.
+        Trả về đường dẫn file cục bộ nếu thành công, None nếu thất bại.
+        """
+        if not image_url:
+            return None
+
+        try:
+            from config import IMAGE_BASE_PATH
+            images_dir = IMAGE_BASE_PATH.rstrip(os.sep)
+            os.makedirs(images_dir, exist_ok=True)
+
+            # Lấy tên file từ URL hoặc dùng item_name làm tên file
+            url_filename = image_url.split('/')[-1].split('?')[0]
+            if url_filename and '.' in url_filename:
+                local_filename = url_filename
+            else:
+                # Chuẩn hóa tên file từ item_name
+                safe_name = "".join(c if c.isalnum() or c in '-_' else '_' for c in item_name)
+                local_filename = f"{safe_name}.png"
+
+            local_path = os.path.join(images_dir, local_filename)
+
+            # Tải ảnh nếu chưa có hoặc để cập nhật
+            response = requests.get(image_url, timeout=30, stream=True)
+            response.raise_for_status()
+
+            with open(local_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            logging.info(f"API: Đã tải ảnh '{item_name}' về {local_path}.")
+            return local_path
+
+        except requests.RequestException as e:
+            logging.error(f"API: Lỗi tải ảnh '{item_name}' từ {image_url}: {e}")
+            return None
+        except OSError as e:
+            logging.error(f"API: Lỗi ghi file ảnh '{item_name}': {e}")
             return None
 
     def get_customer_by_id(self, user_id):

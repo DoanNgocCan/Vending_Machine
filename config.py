@@ -30,3 +30,14 @@ PRODUCT_IMAGES_CONFIG = {
     "cookie": ("Bánh Quy", "cookie.png", 2800),
     "candy": ("Kẹo Dẻo", "candy.png", 2500)
 }
+
+# --- Cấu hình MQTT ---
+# Có thể ghi đè bằng biến môi trường MQTT_BROKER_HOST và MQTT_BROKER_PORT
+MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST", "localhost")
+MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+
+# Topic MQTT cho cập nhật giá/số lượng nhanh (hot update)
+MQTT_TOPIC_PRODUCT_UPDATE = "vending_machine/product/update"
+
+# Topic MQTT báo hiệu có dữ liệu lớn cần tải qua HTTP (sản phẩm mới, ảnh...)
+MQTT_TOPIC_DATA_CHANGED = "vending_machine/product/data_changed"
