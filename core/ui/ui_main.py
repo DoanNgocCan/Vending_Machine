@@ -63,7 +63,7 @@ class MainView:
         self._init_control_panel()
 
         # --- 3. VẼ LƯỚI SẢN PHẨM LẦN ĐẦU ---
-        self.refresh_product_grid()
+        #self.refresh_product_grid()
 
     def _init_control_panel(self):
         """Khởi tạo cột bên phải (Giỏ hàng, Nút bấm, Đăng nhập...)"""
@@ -159,8 +159,133 @@ class MainView:
     # ------------------------------------------------------------------
     # Lưới sản phẩm
     # ------------------------------------------------------------------
+    # Sơ đồ 10 ô trên giao diện (row, col, rowspan, colspan)
+    SLOT_LAYOUT = {
+        1: (2, 0, 2, 1),  # Ô 1: Trái, To
+        2: (2, 1, 1, 1),  # Ô 2: Giữa, Trên
+        3: (2, 2, 1, 1),  # Ô 3: Giữa, Trên
+        4: (2, 3, 2, 1),  # Ô 4: Phải, To
+        5: (3, 1, 1, 1),  # Ô 5: Giữa, Dưới
+        6: (3, 2, 1, 1),  # Ô 6: Giữa, Dưới
+        7: (4, 0, 1, 1),  # Ô 7: Hàng cuối
+        8: (4, 1, 1, 1),  # Ô 8: Hàng cuối
+        9: (4, 2, 1, 1),  # Ô 9: Hàng cuối
+        10:(4, 3, 1, 1)   # Ô 10: Hàng cuối
+    }
 
     def refresh_product_grid(self):
+        print("[UI] Đang làm mới 10 ô sản phẩm...")
+        
+        # 1. Xóa các nút cũ
+        for btn in self.product_buttons:
+            btn.destroy()
+        self.product_buttons.clear()
+        self._product_btn_map.clear()
+
+        # 2. Lấy dữ liệu tồn kho (Key là Slot Number từ 1 đến 10)
+        try:
+            current_stock = self.controller.get_latest_inventory()
+        except AttributeError:
+            current_stock = {}
+
+        font_sizes = {"name": 14}
+        grid_padx, grid_pady = 10, 25
+        img_size = (150, 200)
+
+        # 3. Quét qua đúng 10 ô vật lý
+        for slot in range(1, 11):
+            row, col, rowspan, colspan = self.SLOT_LAYOUT[slot]
+            product_info = current_stock.get(slot)
+            
+            # Vẽ giao diện cho từng ô
+            self._create_slot_button(
+                slot, product_info, row, col, rowspan, colspan,
+                img_size, font_sizes, grid_padx, grid_pady
+            )
+
+        # Cấu hình co giãn lưới
+        for i in range(4):
+            self.product_display_frame.grid_columnconfigure(i, weight=1)
+        for r in range(2, 5):
+            self.product_display_frame.grid_rowconfigure(r, weight=1)
+
+    def _create_slot_button(self, slot, product_info, row, col, rowspan, colspan,
+                               img_size, font_sizes, grid_padx, grid_pady):
+        """Tạo nút hiển thị cho 1 ô (có hoặc không có sản phẩm)."""
+        
+        # Nếu ô trống (không có sản phẩm)
+        if not product_info:
+            empty_frame = tk.Button(
+                self.product_display_frame, bd=2, relief=tk.FLAT,
+                bg="#f0f0f0", state=tk.DISABLED,
+                text=f"Ô số {slot}\n[Trống]", font=("Arial", font_sizes["name"]), fg="#aaaaaa"
+            )
+            empty_frame.grid(row=row, column=col, rowspan=rowspan, columnspan=colspan, padx=grid_padx, pady=grid_pady, sticky="nsew")
+            self.product_buttons.append(empty_frame)
+            return
+
+        # --- NẾU Ô CÓ SẢN PHẨM ---
+        item_name = product_info["item_name"]
+        img_path = product_info["image_path"]
+        current_price = product_info["price"]
+        stock_qty = product_info["qty"]
+        product_id = f"slot_{slot}"
+
+        is_out_of_stock = stock_qty <= 0
+
+        if is_out_of_stock:
+            btn_state = tk.DISABLED
+            btn_bg = "#e0e0e0"
+            text_color = "red"
+            status_text = f"{int(current_price):,}đ\n(HẾT)"
+        else:
+            btn_state = tk.NORMAL
+            btn_bg = "lightyellow"
+            text_color = "black"
+            status_text = f"{int(current_price):,}đ"
+
+        display_text = f"Ô {slot}: {item_name}\n{status_text}"
+
+        item_frame = tk.Button(
+            self.product_display_frame, bd=2, relief=tk.RAISED,
+            bg=btn_bg, activebackground=btn_bg,
+            compound=tk.TOP, state=btn_state,
+            disabledforeground=text_color
+        )
+
+        # Xử lý hình ảnh (có cache)
+        try:
+            photo_img = self.controller.cached_product_images.get(product_id)
+            if not photo_img and img_path and os.path.exists(img_path):
+                img = Image.open(img_path).resize(img_size, Image.Resampling.LANCZOS)
+                photo_img = ImageTk.PhotoImage(img)
+                self.controller.cached_product_images[product_id] = photo_img
+
+            if photo_img:
+                item_frame.config(image=photo_img, text=display_text,
+                                  font=("Arial", font_sizes["name"]), fg=text_color, wraplength=140)
+                item_frame.image = photo_img
+            else:
+                item_frame.config(text=f"[No Img]\n{display_text}")
+
+        except Exception as e:
+            item_frame.config(text=f"Error\n{display_text}")
+
+        if not is_out_of_stock:
+            # Truyền ID giả lập để tương thích với luồng Controller hiện tại
+            item_frame.config(
+                command=lambda p=(product_id, item_name, current_price), b=item_frame:
+                    self.controller.on_product_select(p, b)
+            )
+
+        item_frame.grid(
+            row=row, column=col, rowspan=rowspan, columnspan=colspan,
+            padx=grid_padx, pady=grid_pady, sticky="nsew"
+        )
+
+        self.product_buttons.append(item_frame)
+        self._product_btn_map[item_name] = item_frame # Vẫn lưu map theo tên để update nhanh khi có giao dịch
+    '''def refresh_product_grid(self):
         """
         Hàm QUAN TRỌNG: Xóa hết nút cũ và vẽ lại dựa trên DB mới nhất.
         """
@@ -219,14 +344,13 @@ class MainView:
         for i in range(num_cols):
             self.product_display_frame.grid_columnconfigure(i, weight=1)
         for r in range(2, max((row + rowspan for row, _, rowspan, _ in layout), default=6) + 1):
-            self.product_display_frame.grid_rowconfigure(r, weight=1)
-
+            self.product_display_frame.grid_rowconfigure(r, weight=1)'''
     @staticmethod
     def _make_product_id(item_name):
         """Tạo khóa cache cho sản phẩm từ item_name (dùng cho sản phẩm từ server không có trong cấu hình tĩnh)."""
         return "".join(c if c.isalnum() or c in '-_' else '_' for c in item_name).lower()
 
-    def _build_product_list(self, current_stock):
+    '''def _build_product_list(self, current_stock):
         """
         Xây dựng danh sách sản phẩm để hiển thị.
 
@@ -274,7 +398,7 @@ class MainView:
                 "stock_qty": data.get("qty", 0),
             })
 
-        '''# --- Bổ sung sản phẩm từ cấu hình tĩnh chưa có trong DB ---
+        # --- Bổ sung sản phẩm từ cấu hình tĩnh chưa có trong DB ---
         db_names = set(current_stock.keys())
         for product_id, (name, img_file, default_price) in PRODUCT_IMAGES_CONFIG.items():
             if name not in db_names:
@@ -288,11 +412,11 @@ class MainView:
                     "default_price": default_price,
                     "db_price": 0,
                     "stock_qty": 0,
-                })'''
+                })
 
-        return result
+        return result'''
 
-    def _get_layout(self, count):
+    '''def _get_layout(self, count):
         """
         Trả về danh sách (row, col, rowspan, colspan) cho `count` sản phẩm.
         Dùng layout cố định cho 10 sản phẩm; layout lưới đơn giản cho các trường hợp khác.
@@ -312,9 +436,9 @@ class MainView:
             row = 2 + (i // cols)
             col = i % cols
             layout.append((row, col, 1, 1))
-        return layout
+        return layout'''
 
-    def _create_product_button(self, product_info, row, col, rowspan, colspan,
+    '''def _create_product_button(self, product_info, row, col, rowspan, colspan,
                                img_size, font_sizes, grid_padx, grid_pady):
         """Tạo và đặt một nút sản phẩm vào lưới."""
         product_id = product_info["product_id"]
@@ -380,8 +504,8 @@ class MainView:
 
         self.product_buttons.append(item_frame)
         self._product_btn_map[item_name] = item_frame
-
-    def _show_empty_state(self):
+'''
+    '''def _show_empty_state(self):
         """Hiển thị thông báo khi không có sản phẩm nào (server trống)."""
         empty_label = tk.Label(
             self.product_display_frame,
@@ -390,7 +514,7 @@ class MainView:
             justify=tk.CENTER
         )
         empty_label.grid(row=2, column=0, columnspan=4, pady=80, sticky="nsew")
-        self.product_buttons.append(empty_label)
+        self.product_buttons.append(empty_label)'''
 
     def update_single_product(self, item_name, price=None, quantity=None):
         """
@@ -405,7 +529,7 @@ class MainView:
         btn = self._product_btn_map.get(item_name)
         if btn is None:
             # Sản phẩm chưa hiển thị → vẽ lại toàn bộ
-            self.refresh_product_grid()
+            #self.refresh_product_grid()
             return
 
         try:

@@ -54,10 +54,10 @@ class LocalDatabaseManager:
                     )
                 """)
 
-                # Bảng inventory local
+                # Bảng inventory local - Khóa chính là slot_number
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS inventory (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        slot_number INTEGER PRIMARY KEY,
                         item_name TEXT UNIQUE,
                         price REAL DEFAULT 0,
                         units_sold INTEGER DEFAULT 0,
@@ -205,10 +205,11 @@ class LocalDatabaseManager:
         try:
             with self._get_connection() as con:
                 rows = con.execute(
-                    "SELECT item_name, units_left, price, image_path, server_product_id FROM inventory"
+                    "SELECT slot_number, item_name, units_left, price, image_path, server_product_id FROM inventory"
                 ).fetchall()
                 for r in rows:
-                    stock_map[r['item_name']] = {
+                    stock_map[r['slot_number']] = {
+                        'item_name': r['item_name'],
                         'qty': r['units_left'],
                         'price': r['price'],
                         'image_path': r['image_path'],
@@ -336,10 +337,9 @@ class LocalDatabaseManager:
         logging.info(f"🔄 Đang đồng bộ kho từ Server cho máy: {DEVICE_ID}...")
 
         try:
+            from core.features.api_manager import api_manager
             s = requests.Session()
             s.trust_env = False
-            
-            # Đảm bảo header có X-Device-ID
             headers = API_HEADERS.copy()
             if 'X-Device-ID' not in headers:
                 headers['X-Device-ID'] = DEVICE_ID
@@ -354,22 +354,35 @@ class LocalDatabaseManager:
                     with self._get_connection() as con:
                         cursor = con.cursor()
                         count = 0
-                        server_item_names = [] # Để theo dõi xóa sản phẩm rác
+                        server_slots = [] # Danh sách các ô đang có hàng trên Server
                         
                         for p in server_products:
+                            slot_number = p.get('slot_number')
+                            if not slot_number: continue # Bỏ qua nếu dữ liệu lỗi không có số ô
+                                
+                            server_slots.append(slot_number)
                             item_name = p['item_name']
-                            server_item_names.append(item_name)
                             
-                            # Lấy số lượng từ server, ép kiểu int, mặc định là 0
                             try:
                                 server_qty = int(p.get('units_left', 0))
                             except (ValueError, TypeError):
                                 server_qty = 0
 
+                            # --- TẢI ẢNH TỪ SERVER ---
+                            raw_image_url = p.get('image_url') or p.get('image_path')
+                            local_image_path = None
+                            if raw_image_url:
+                                full_url = f"{SERVER_URL}{raw_image_url}" if raw_image_url.startswith('/') else raw_image_url
+                                downloaded_path = api_manager.download_product_image(full_url, item_name)
+                                if downloaded_path:
+                                    local_image_path = downloaded_path
+
+                            # LƯU VÀO DATABASE THEO SLOT_NUMBER
                             cursor.execute("""
-                                INSERT INTO inventory (item_name, price, cost_price, units_left, description, image_path, server_product_id, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                                ON CONFLICT(item_name) DO UPDATE SET
+                                INSERT INTO inventory (slot_number, item_name, price, cost_price, units_left, description, image_path, server_product_id, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                ON CONFLICT(slot_number) DO UPDATE SET
+                                    item_name = excluded.item_name,
                                     price = excluded.price,
                                     cost_price = excluded.cost_price,
                                     units_left = excluded.units_left,
@@ -378,31 +391,23 @@ class LocalDatabaseManager:
                                     server_product_id = excluded.server_product_id,
                                     updated_at = excluded.updated_at
                             """, (
-                                item_name, 
-                                p.get('price', 0), 
-                                p.get('cost_price', 0), 
-                                server_qty, 
-                                p.get('description', ''),
-                                p.get('image_path', p.get('image_url', '')),
-                                str(p.get('id', '')),
-                                datetime.now().isoformat()
+                                slot_number, item_name, p.get('price', 0), p.get('cost_price', 0), 
+                                server_qty, p.get('description', ''), local_image_path,
+                                str(p.get('id', '')), datetime.now().isoformat()
                             ))
                             count += 1
                         
-                        # XÓA CÁC SẢN PHẨM KHÔNG CÒN TRÊN SERVER
-                        if server_item_names:
-                            placeholders = ','.join(['?'] * len(server_item_names))
-                            delete_query = f"DELETE FROM inventory WHERE item_name NOT IN ({placeholders})"
-                            cursor.execute(delete_query, server_item_names)
+                        # XÓA CÁC Ô KHÔNG CÓ HÀNG TRÊN SERVER
+                        if server_slots:
+                            placeholders = ','.join(['?'] * len(server_slots))
+                            delete_query = f"DELETE FROM inventory WHERE slot_number NOT IN ({placeholders})"
+                            cursor.execute(delete_query, server_slots)
                         else:
                             cursor.execute("DELETE FROM inventory")
                             
                         con.commit()
-                        logging.info(f"✅ Đã đồng bộ {count} sản phẩm và tồn kho từ Server.")
+                        logging.info(f"✅ Đã cập nhật {count} ô chứa hàng từ Server.")
                         return True
-            else:
-                logging.error(f"❌ Lỗi kết nối Server: {response.status_code}")
-
         except Exception as e:
             logging.error(f"❌ Lỗi sync_products_from_server: {e}")
             return False
