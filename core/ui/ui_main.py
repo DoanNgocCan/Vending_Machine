@@ -163,8 +163,6 @@ class MainView:
     def refresh_product_grid(self):
         """
         Hàm QUAN TRỌNG: Xóa hết nút cũ và vẽ lại dựa trên DB mới nhất.
-        Hỗ trợ cả sản phẩm từ cấu hình tĩnh lẫn sản phẩm mới tải về từ server.
-        Được gọi khi MainView khởi tạo hoặc khi Controller/MQTT yêu cầu cập nhật.
         """
         print("[UI] Đang làm mới lưới sản phẩm từ Database Local...")
         
@@ -182,15 +180,23 @@ class MainView:
             current_stock = {}
 
         # 3. Xây dựng danh sách sản phẩm sẽ hiển thị.
-        #    Ưu tiên dữ liệu từ DB (server); bổ sung cấu hình tĩnh cho sản phẩm chưa có trong DB.
         products_to_show = self._build_product_list(current_stock)
+
+        # =========================================================
+        # GIỚI HẠN GIAO DIỆN STRICTLY 10 SẢN PHẨM
+        # =========================================================
+        if len(products_to_show) > 10:
+            # Lấy 9 sản phẩm đầu tiên và lấy sản phẩm cuối cùng (mới nhất từ DB)
+            # để ghi đè vào vị trí thứ 10. Các sản phẩm ở giữa bị bỏ qua trên UI.
+            products_to_show = products_to_show[:9] + [products_to_show[-1]]
+        # =========================================================
 
         # 4. Nếu không có sản phẩm nào → hiển thị giao diện trống
         if not products_to_show:
             self._show_empty_state()
             return
 
-        # 5. Xác định layout
+        # 5. Xác định layout (Lúc này len(products_to_show) chắc chắn <= 10)
         layout = self._get_layout(len(products_to_show))
 
         font_sizes = {"name": 14}
@@ -268,7 +274,7 @@ class MainView:
                 "stock_qty": data.get("qty", 0),
             })
 
-        # --- Bổ sung sản phẩm từ cấu hình tĩnh chưa có trong DB ---
+        '''# --- Bổ sung sản phẩm từ cấu hình tĩnh chưa có trong DB ---
         db_names = set(current_stock.keys())
         for product_id, (name, img_file, default_price) in PRODUCT_IMAGES_CONFIG.items():
             if name not in db_names:
@@ -282,7 +288,7 @@ class MainView:
                     "default_price": default_price,
                     "db_price": 0,
                     "stock_qty": 0,
-                })
+                })'''
 
         return result
 

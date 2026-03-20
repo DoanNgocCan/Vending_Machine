@@ -332,19 +332,19 @@ class LocalDatabaseManager:
             logging.error(f"Lỗi sync users from server: {e}")
 
     def sync_products_from_server(self):
-        """
-        [FIX] Sử dụng requests.Session() để tắt trust_env
-        """
         get_url = f"{SERVER_URL}/api/products"
         logging.info(f"🔄 Đang đồng bộ kho từ Server cho máy: {DEVICE_ID}...")
 
         try:
-            # --- [SỬA LỖI TẠI ĐÂY] ---
             s = requests.Session()
             s.trust_env = False
             
-            response = s.get(get_url, headers=API_HEADERS, timeout=10)
-            # -------------------------
+            # Đảm bảo header có X-Device-ID
+            headers = API_HEADERS.copy()
+            if 'X-Device-ID' not in headers:
+                headers['X-Device-ID'] = DEVICE_ID
+
+            response = s.get(get_url, headers=headers, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
@@ -354,11 +354,18 @@ class LocalDatabaseManager:
                     with self._get_connection() as con:
                         cursor = con.cursor()
                         count = 0
+                        server_item_names = [] # Để theo dõi xóa sản phẩm rác
                         
                         for p in server_products:
-                            server_qty = p.get('units_left')
-                            if server_qty is None:
-                                server_qty = p.get('quantity', 0)
+                            item_name = p['item_name']
+                            server_item_names.append(item_name)
+                            
+                            # Lấy số lượng từ server, ép kiểu int, mặc định là 0
+                            try:
+                                server_qty = int(p.get('units_left', 0))
+                            except (ValueError, TypeError):
+                                server_qty = 0
+
                             cursor.execute("""
                                 INSERT INTO inventory (item_name, price, cost_price, units_left, description, image_path, server_product_id, updated_at)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -371,8 +378,8 @@ class LocalDatabaseManager:
                                     server_product_id = excluded.server_product_id,
                                     updated_at = excluded.updated_at
                             """, (
-                                p['item_name'], 
-                                p['price'], 
+                                item_name, 
+                                p.get('price', 0), 
                                 p.get('cost_price', 0), 
                                 server_qty, 
                                 p.get('description', ''),
@@ -381,6 +388,15 @@ class LocalDatabaseManager:
                                 datetime.now().isoformat()
                             ))
                             count += 1
+                        
+                        # XÓA CÁC SẢN PHẨM KHÔNG CÒN TRÊN SERVER
+                        if server_item_names:
+                            placeholders = ','.join(['?'] * len(server_item_names))
+                            delete_query = f"DELETE FROM inventory WHERE item_name NOT IN ({placeholders})"
+                            cursor.execute(delete_query, server_item_names)
+                        else:
+                            cursor.execute("DELETE FROM inventory")
+                            
                         con.commit()
                         logging.info(f"✅ Đã đồng bộ {count} sản phẩm và tồn kho từ Server.")
                         return True
