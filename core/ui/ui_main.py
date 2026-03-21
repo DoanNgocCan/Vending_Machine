@@ -229,7 +229,7 @@ class MainView:
         img_path = product_info["image_path"]
         current_price = product_info["price"]
         stock_qty = product_info["qty"]
-        product_id = f"slot_{slot}"
+        product_id = slot 
 
         is_out_of_stock = stock_qty <= 0
 
@@ -520,7 +520,6 @@ class MainView:
         """
         Cập nhật hiển thị của MỘT sản phẩm cụ thể mà không vẽ lại toàn bộ lưới.
         Được gọi khi nhận được MQTT hot update (Requirement 2A).
-
         Args:
             item_name: Tên sản phẩm (khớp với DB).
             price: Giá mới (None = không thay đổi).
@@ -528,8 +527,6 @@ class MainView:
         """
         btn = self._product_btn_map.get(item_name)
         if btn is None:
-            # Sản phẩm chưa hiển thị → vẽ lại toàn bộ
-            #self.refresh_product_grid()
             return
 
         try:
@@ -537,7 +534,13 @@ class MainView:
         except AttributeError:
             current_stock = {}
 
-        product_data = current_stock.get(item_name, {})
+        product_data = {}
+        current_slot = "" # Thêm biến hứng slot
+        for slot, data in current_stock.items():
+            if data.get('item_name') == item_name:
+                product_data = data
+                current_slot = slot
+                break
         db_price = price if price is not None else product_data.get("price", 0)
         stock_qty = quantity if quantity is not None else product_data.get("qty", 0)
 
@@ -558,7 +561,7 @@ class MainView:
             text_color = "black"
             status_text = f"{int(current_price):,}đ"
 
-        display_text = f"{item_name}\n{status_text}"
+        display_text = f"Ô {current_slot}: {item_name}\n{status_text}"
 
         # Cập nhật nút
         btn.config(state=btn_state, bg=btn_bg, activebackground=btn_bg,
@@ -569,10 +572,10 @@ class MainView:
             btn.config(text=f"[No Img]\n{display_text}")
 
         # Gán lại command với giá mới
-        static_key = static[0] if static else self._make_product_id(item_name)
+        #static_key = static[0] if static else self._make_product_id(item_name)
         if not is_out_of_stock:
             btn.config(
-                command=lambda p=(static_key, item_name, current_price), b=btn:
+                command=lambda p=(current_slot, item_name, current_price), b=btn:
                     self.controller.on_product_select(p, b)
             )
         else:

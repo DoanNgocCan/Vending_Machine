@@ -434,6 +434,8 @@ class AdvancedUIManager:
         print("Bắt đầu tải trước và xử lý hình ảnh...")
         screen_width = 1920
         screen_height = 1080
+        
+        # 1. Tải ảnh quảng cáo
         for img_file in AD_IMAGES_CONFIG:
             try:
                 img = Image.open(f"{IMAGE_BASE_PATH}{img_file}")
@@ -441,18 +443,34 @@ class AdvancedUIManager:
                 self.cached_ad_images.append(ImageTk.PhotoImage(img))
             except Exception as e:
                 print(f"Lỗi tải ảnh quảng cáo {img_file}: {e}")
+                
+        # 2. Tải ảnh sản phẩm TỪ DATABASE LOCAL
         img_size = (150, 200)
-        for product_id, (_, img_file, _) in PRODUCT_IMAGES_CONFIG.items():
-            try:
-                img_path = f"{IMAGE_BASE_PATH}{img_file}"
-                img = Image.open(img_path)
-                img = img.resize(img_size, Image.Resampling.LANCZOS)
-                self.cached_product_images[product_id] = ImageTk.PhotoImage(img)
-            except Exception as e:
-                print(f"Lỗi tải ảnh sản phẩm {img_file}: {e}")
-                self.cached_product_images[product_id] = None
+        try:
+            # Lấy map tồn kho mới nhất (Key là slot, Value là data sản phẩm)
+            current_inventory = self.get_latest_inventory()
+            
+            for slot, product_data in current_inventory.items():
+                img_path = product_data.get("image_path")
+                item_name = product_data.get("item_name")
+                
+                # Kiểm tra xem đường dẫn ảnh có tồn tại trên máy client không
+                if img_path and os.path.exists(img_path):
+                    try:
+                        img = Image.open(img_path)
+                        img = img.resize(img_size, Image.Resampling.LANCZOS)
+                        # Lưu cache theo ID là Số Ô (slot)
+                        self.cached_product_images[slot] = ImageTk.PhotoImage(img)
+                    except Exception as e:
+                        print(f"Lỗi tải ảnh sản phẩm '{item_name}' (Ô số {slot}): {e}")
+                        self.cached_product_images[slot] = None
+                else:
+                    self.cached_product_images[slot] = None
+                    
+        except Exception as e:
+            print(f"Lỗi khi preload ảnh sản phẩm từ DB: {e}")
+            
         print("Tải trước hình ảnh hoàn tất!")
-
 
     # ==================================================================
     # LOGIC NGHIỆP VỤ CỦA MÀN HÌNH CHÍNH
@@ -482,19 +500,39 @@ class AdvancedUIManager:
                 button.config(relief=tk.SUNKEN, bg="lightgreen", activebackground="lightgreen")
                 self.selected_button = button
             except: pass
+            
         self.selected_product = product
         product_id, name, price = product
         current_inventory = self.get_latest_inventory()
-        product_data = current_inventory.get(name, {})
-        real_stock = product_data.get('qty', 0)
         
-        self.max_available_quantity = real_stock
-        self.status_message_var.set(f"✅ ĐÃ CHỌN: {name} - {price:,}đ (Còn: {real_stock})")
-        if real_stock > 0:
+        product_data = {}
+        for slot, data in current_inventory.items():
+            if data.get('item_name') == name:
+                product_data = data
+                break
+                
+        real_stock = product_data.get('qty', 0)
+        qty_in_cart = 0
+        for item in self.logic.cart:
+            if item['id'] == product_id:
+                qty_in_cart += item['quantity']
+                
+        # Số lượng thực sự có thể thêm vào giỏ lúc này
+        available_stock = real_stock - qty_in_cart 
+        # Gán giới hạn mới cho các nút tăng/giảm số lượng
+        self.max_available_quantity = available_stock
+        
+        if available_stock > 0:
             self.selected_quantity = 1
+            self.status_message_var.set(f"✅ ĐÃ CHỌN: {name} - {price:,}đ (Còn lại: {available_stock})")
         else:
             self.selected_quantity = 0
-            self.status_message_var.set(f"❌ {name} đã hết hàng!")
+            if real_stock > 0:
+                # Trường hợp kho còn nhưng đã gom hết vào giỏ
+                self.status_message_var.set(f"⚠️ Bạn đã gom toàn bộ {real_stock} {name} vào giỏ!")
+            else:
+                # Trường hợp kho trống rỗng từ đầu
+                self.status_message_var.set(f"❌ {name} hiện đang hết hàng!")
             
         self.quantity_var.set(str(self.selected_quantity))
 
@@ -511,7 +549,7 @@ class AdvancedUIManager:
 
     def increase_quantity(self):
         """
-        [SỬA ĐỔI] Tăng số lượng nhưng không vượt quá tồn kho.
+        Tăng số lượng nhưng không vượt quá tồn kho (Đã vá lỗi crash).
         """
         if not self.selected_product:
             return
@@ -523,13 +561,40 @@ class AdvancedUIManager:
         elif self.selected_quantity >= self.max_available_quantity:
             # Thông báo cho người dùng biết đã max
             self.status_message_var.set(f"⚠️ Chỉ còn {self.max_available_quantity} sản phẩm trong máy!")
-            # Reset lại thông báo sau 2 giây
-            self.root.after(2000, lambda: self.status_message_var.set(f"Chọn số lượng cho {self.selected_product[1]}"))
+            
+            # --- CƠ CHẾ KHÔI PHỤC AN TOÀN ---
+            # Lấy tên sản phẩm ra một biến cục bộ để tránh bị mất dữ liệu nếu user hủy chọn
+            current_name = self.selected_product[1]
+            
+            def reset_msg():
+                # Chỉ khôi phục text nếu khách vẫn ĐANG CHỌN đúng sản phẩm đó
+                if self.selected_product and self.selected_product[1] == current_name:
+                    self.status_message_var.set(f"Chọn số lượng cho {current_name}")
+            
+            # Đặt lịch chạy hàm an toàn sau 2 giây
+            self.root.after(2000, reset_msg)
 
     def decrease_quantity(self):
+        """
+        Giảm số lượng nhưng không nhỏ hơn 1 (Đã vá lỗi crash).
+        """
+        if not self.selected_product:
+            return
+            
         if self.selected_quantity > 1:
             self.selected_quantity -= 1
             self.quantity_var.set(str(self.selected_quantity))
+        else:
+            self.status_message_var.set("⚠️ Số lượng tối thiểu là 1")
+            
+            # --- CƠ CHẾ KHÔI PHỤC AN TOÀN ---
+            current_name = self.selected_product[1]
+            
+            def reset_msg():
+                if self.selected_product and self.selected_product[1] == current_name:
+                    self.status_message_var.set(f"Chọn số lượng cho {current_name}")
+            
+            self.root.after(2000, reset_msg)
 
     def on_confirm_add(self):
         if not self.selected_product:
@@ -545,21 +610,25 @@ class AdvancedUIManager:
              self.status_message_var.set(f"Lỗi: Không đủ hàng (Còn {self.max_available_quantity})")
              return
         if self.selected_quantity <= 0:
-             self.status_message_var.set("Lỗi: Số lượng không hợp lệ")
+             self.status_message_var.set("Sản phẩm đã hết hàng")
              return
 
-        # Vòng lặp thêm sản phẩm
-        for _ in range(self.selected_quantity):
-            self.logic.current_entry_buffer = product_id
-            
-            # --- [SỬA] TRUYỀN GIÁ 'price' VÀO ĐÂY ---
-            success, message, _ = self.logic.add_item_from_entry(override_price=price)
-            # ----------------------------------------
-            
-            if not success:
-                self.status_message_var.set(f"Lỗi: {message}")
-                self.root.after(3000, lambda: self.status_message_var.set("Chọn sản phẩm để mua hàng"))
-                return
+        found = False
+        for item in self.logic.cart:
+            if item['id'] == product_id:
+                item['quantity'] += self.selected_quantity
+                item['total'] = item['quantity'] * item['price']
+                found = True
+                break
+        
+        if not found:
+            self.logic.cart.append({
+                'id': product_id,
+                'name': name,
+                'price': price,
+                'quantity': self.selected_quantity,
+                'total': price * self.selected_quantity
+            })
                 
         self.update_cart_display_handler()
         self.status_message_var.set(f"Đã thêm {self.selected_quantity} {name} vào giỏ hàng!")

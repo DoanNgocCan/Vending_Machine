@@ -58,7 +58,7 @@ class LocalDatabaseManager:
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS inventory (
                         slot_number INTEGER PRIMARY KEY,
-                        item_name TEXT UNIQUE,
+                        item_name TEXT,  -- CHÚ Ý: Đã xóa chữ UNIQUE ở đây
                         price REAL DEFAULT 0,
                         units_sold INTEGER DEFAULT 0,
                         units_left INTEGER DEFAULT 0,
@@ -253,12 +253,7 @@ class LocalDatabaseManager:
             return False
 
     def upsert_product(self, product_data, local_image_path=None):
-        """
-        Thêm mới hoặc cập nhật một sản phẩm trong DB cục bộ.
-        Dùng khi nhận tín hiệu MQTT data_changed và đã tải dữ liệu đầy đủ từ server.
-        """
         if not product_data or not product_data.get('item_name'):
-            logging.warning("DB: upsert_product nhận dữ liệu không hợp lệ.")
             return False
         try:
             from datetime import datetime as _dt
@@ -272,21 +267,19 @@ class LocalDatabaseManager:
             image_path = local_image_path or product_data.get('image_path', '')
 
             with self._get_connection() as con:
+                # Chỉ UPDATE giá và số lượng, không chèn mới nếu chưa có ô
                 con.execute("""
-                    INSERT INTO inventory
-                        (item_name, price, cost_price, units_left, description, image_path, server_product_id, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(item_name) DO UPDATE SET
-                        price = excluded.price,
-                        cost_price = excluded.cost_price,
-                        units_left = excluded.units_left,
-                        description = excluded.description,
-                        image_path = excluded.image_path,
-                        server_product_id = excluded.server_product_id,
-                        updated_at = excluded.updated_at
-                """, (item_name, price, cost_price, units_left, description, image_path, server_product_id, now))
+                    UPDATE inventory SET
+                        price = ?,
+                        cost_price = ?,
+                        units_left = ?,
+                        description = ?,
+                        image_path = COALESCE(?, image_path),
+                        server_product_id = ?,
+                        updated_at = ?
+                    WHERE item_name = ?
+                """, (price, cost_price, units_left, description, image_path, server_product_id, now, item_name))
                 con.commit()
-            logging.info(f"DB: Đã upsert sản phẩm '{item_name}' (server_id={server_product_id}).")
             return True
         except sqlite3.Error as e:
             logging.error(f"DB: Lỗi upsert sản phẩm '{product_data.get('item_name')}': {e}")
@@ -351,33 +344,47 @@ class LocalDatabaseManager:
                 if data.get('success'):
                     server_products = data.get('products', [])
                     
+                    # --- BƯỚC 1: XỬ LÝ MẠNG VÀ TẢI ẢNH (Tuyệt đối không mở DB lúc này) ---
+                    processed_products = []
+                    server_slots = []
+                    
+                    for p in server_products:
+                        slot_number = p.get('slot_number')
+                        if not slot_number: continue 
+                            
+                        server_slots.append(slot_number)
+                        item_name = p['item_name']
+                        
+                        try:
+                            server_qty = int(p.get('units_left', 0))
+                        except (ValueError, TypeError):
+                            server_qty = 0
+
+                        raw_image_url = p.get('image_url') or p.get('image_path')
+                        local_image_path = None
+                        if raw_image_url:
+                            full_url = f"{SERVER_URL}{raw_image_url}" if raw_image_url.startswith('/') else raw_image_url
+                            downloaded_path = api_manager.download_product_image(full_url, item_name)
+                            if downloaded_path:
+                                local_image_path = downloaded_path
+
+                        processed_products.append({
+                            'slot': slot_number,
+                            'name': item_name,
+                            'price': p.get('price', 0),
+                            'cost': p.get('cost_price', 0),
+                            'qty': server_qty,
+                            'desc': p.get('description', ''),
+                            'img': local_image_path,
+                            'sid': str(p.get('id', ''))
+                        })
+
+                    # --- BƯỚC 2: MỞ DATABASE VÀ CẬP NHẬT CỰC NHANH (Chống Lock DB) ---
                     with self._get_connection() as con:
                         cursor = con.cursor()
                         count = 0
-                        server_slots = [] # Danh sách các ô đang có hàng trên Server
                         
-                        for p in server_products:
-                            slot_number = p.get('slot_number')
-                            if not slot_number: continue # Bỏ qua nếu dữ liệu lỗi không có số ô
-                                
-                            server_slots.append(slot_number)
-                            item_name = p['item_name']
-                            
-                            try:
-                                server_qty = int(p.get('units_left', 0))
-                            except (ValueError, TypeError):
-                                server_qty = 0
-
-                            # --- TẢI ẢNH TỪ SERVER ---
-                            raw_image_url = p.get('image_url') or p.get('image_path')
-                            local_image_path = None
-                            if raw_image_url:
-                                full_url = f"{SERVER_URL}{raw_image_url}" if raw_image_url.startswith('/') else raw_image_url
-                                downloaded_path = api_manager.download_product_image(full_url, item_name)
-                                if downloaded_path:
-                                    local_image_path = downloaded_path
-
-                            # LƯU VÀO DATABASE THEO SLOT_NUMBER
+                        for p in processed_products:
                             cursor.execute("""
                                 INSERT INTO inventory (slot_number, item_name, price, cost_price, units_left, description, image_path, server_product_id, updated_at)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -391,13 +398,13 @@ class LocalDatabaseManager:
                                     server_product_id = excluded.server_product_id,
                                     updated_at = excluded.updated_at
                             """, (
-                                slot_number, item_name, p.get('price', 0), p.get('cost_price', 0), 
-                                server_qty, p.get('description', ''), local_image_path,
-                                str(p.get('id', '')), datetime.now().isoformat()
+                                p['slot'], p['name'], p['price'], p['cost'], 
+                                p['qty'], p['desc'], p['img'],
+                                p['sid'], datetime.now().isoformat()
                             ))
                             count += 1
                         
-                        # XÓA CÁC Ô KHÔNG CÓ HÀNG TRÊN SERVER
+                        # Xóa các ô trống không có trên server
                         if server_slots:
                             placeholders = ','.join(['?'] * len(server_slots))
                             delete_query = f"DELETE FROM inventory WHERE slot_number NOT IN ({placeholders})"
