@@ -659,6 +659,24 @@ class LocalDatabaseManager:
                     return {"code": user_row['user_id'], "name": user_row['full_name'], "phone": user_row['phone_number'], "points": user_row['points']}
                 return None
         except sqlite3.Error: return None
+    
+    def hot_update_product(self, old_name, new_name, price, quantity):
+        """Cập nhật chớp nhoáng Tên, Giá, Tồn kho không cần HTTP"""
+        try:
+            from datetime import datetime as _dt
+            now = _dt.now().isoformat()
+            with self._get_connection() as con:
+                con.execute("""
+                    UPDATE inventory 
+                    SET item_name = ?, price = ?, units_left = ?, updated_at = ?
+                    WHERE item_name = ?
+                """, (new_name, price, quantity, now, old_name))
+                con.commit()
+            logging.info(f"HOT UPDATE: Đã đổi '{old_name}' -> '{new_name}', giá: {price}, tồn: {quantity}")
+            return True
+        except Exception as e:
+            logging.error(f"Lỗi hot update sản phẩm: {e}")
+            return False
 
     def get_most_recent_customer_with_face_encoding(self):
         sql = "SELECT user_id FROM customers WHERE face_encoding IS NOT NULL ORDER BY created_at DESC LIMIT 1"

@@ -116,10 +116,19 @@ class AdvancedUIManager:
         print("UI_INIT: Bắt đầu kiểm tra và khởi tạo cache nhận diện...")
         self._preload_all_images()
         
-        # === SỬA LỖI KẾT NỐI ===
-        # Khởi tạo MainView và lưu tham chiếu
         self.main_view = MainView(self.root, self)
-        # =========================
+        try:
+            from core.features.mqtt_client import mqtt_manager
+            mqtt_manager.setup(
+                db_manager=self.db_manager,
+                api_manager=self.api_manager,
+                ui_refresh_callback=lambda: self.root.after(100, self.main_view.refresh_product_grid),
+                # SỬA DÒNG BÊN DƯỚI: Đổi từ main_view.hot_update_ui sang self._on_hot_update
+                product_update_callback=lambda old, new, p, q: self.root.after(100, lambda: self._on_hot_update(old, new, p, q))
+            )
+            mqtt_manager.connect()
+        except Exception as e:
+            print(f"Lỗi khởi tạo MQTT: {e}")
         
         self.update_welcome_message()
         self._update_auth_frame_visibility() # Bây giờ hàm này sẽ hoạt động
@@ -699,6 +708,47 @@ class AdvancedUIManager:
         else:
             self.welcome_message_var.set("Chào mừng quý khách!")
 
+    def _on_hot_update(self, old_name, new_name, price, quantity):
+        """Cập nhật Giỏ hàng và Trạng thái chọn khi có Hot Update từ MQTT"""
+        
+        # 1. Cập nhật nút bấm trên Giao diện (UI)
+        self.main_view.hot_update_ui(old_name, new_name, price, quantity)
+        
+        # 2. Cập nhật lại giá tiền NẾU sản phẩm đó đang nằm trong giỏ hàng
+        cart_changed = False
+        qty_in_cart = 0
+        for item in self.logic.cart:
+            if item['name'] == old_name:
+                item['name'] = new_name
+                item['price'] = float(price)
+                item['total'] = item['quantity'] * item['price'] # Tính lại tổng tiền
+                qty_in_cart = item['quantity']
+                cart_changed = True
+                
+        # Nếu giỏ hàng có thay đổi, vẽ lại giỏ hàng ngay lập tức
+        if cart_changed:
+            self.update_cart_display_handler()
+
+        # 3. Cập nhật trạng thái NẾU khách hàng đang click chọn sẵn sản phẩm này
+        if self.selected_product and self.selected_product[1] == old_name:
+            product_id = self.selected_product[0]
+            # Cập nhật tuple bộ nhớ với tên và giá mới
+            self.selected_product = (product_id, new_name, float(price))
+            
+            # Tính lại tồn kho thực tế (trừ đi phần đã lỡ cho vào giỏ)
+            self.max_available_quantity = quantity - qty_in_cart
+            
+            if self.selected_quantity > self.max_available_quantity:
+                self.selected_quantity = max(1, self.max_available_quantity)
+                
+            if self.max_available_quantity > 0:
+                self.status_message_var.set(f"✅ ĐÃ CHỌN: {new_name} - {int(price):,}đ (Còn lại: {self.max_available_quantity})")
+                if self.selected_quantity == 0: self.selected_quantity = 1
+            else:
+                self.status_message_var.set(f"❌ {new_name} hiện đang hết hàng!")
+                self.selected_quantity = 0
+                
+            self.quantity_var.set(str(self.selected_quantity))
     # ==================================================================
     # XỬ LÝ GIAO DỊCH VÀ ĐÓNG ỨNG DỤNG
     # ==================================================================
@@ -792,6 +842,10 @@ class AdvancedUIManager:
         
         print("UI: Bắt đầu quy trình đóng ứng dụng an toàn...")
         self.is_closing = True
+        try:
+            from core.features.mqtt_client import mqtt_manager
+            mqtt_manager.disconnect()
+        except: pass
         print("UI: Dừng camera handler...")
         self._cleanup_keyboard()
         self.logic.close_resources()
