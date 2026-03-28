@@ -7,3 +7,4 @@ CTkMessagebox
 python-dotenv
 payos
 paho-mqtt
+gTTS

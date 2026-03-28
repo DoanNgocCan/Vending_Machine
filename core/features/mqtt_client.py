@@ -189,8 +189,10 @@ class MQTTClientManager:
         event = payload.get("event", "unknown")
         logging.info(f"MQTT: Nhận tín hiệu '{event}'. Đang HTTP Sync toàn bộ dữ liệu...")
 
-        # Không gọi API lẻ nữa, gọi luôn HTTP Sync tổng (vì ảnh hưởng giao diện 10 ô)
         def pull_all_from_server():
+            import time
+            time.sleep(2) 
+            
             if self._db_manager:
                 self._db_manager.sync_products_from_server()
                 if self._ui_refresh_callback:

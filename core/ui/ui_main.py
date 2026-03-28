@@ -134,7 +134,7 @@ class MainView:
                   command=self.controller.on_clear_cart_handler).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
         
         tk.Button(control_buttons_frame, text="THOÁT", font=("Arial", 14, "bold"), bg="black", fg="white", 
-                  command=self.controller.on_app_close).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+                  command=self.controller.return_to_welcome).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
 
         # --- F. Hiển thị Giỏ hàng ---
         cart_frame = tk.Frame(self.control_frame, bg="lightgray")
@@ -179,7 +179,7 @@ class MainView:
         except AttributeError:
             current_stock = {}
 
-        font_sizes = {"name": 14}
+        font_sizes = {"name": 11}
         grid_padx, grid_pady = 10, 25
         img_size = (150, 200)
 
@@ -244,13 +244,34 @@ class MainView:
             disabledforeground=text_color
         )
 
-        # Xử lý hình ảnh (có cache)
+        # Xử lý hình ảnh (có cache thông minh)
         try:
-            photo_img = self.controller.cached_product_images.get(product_id)
+            photo_img = None
+            # Lấy thời gian chỉnh sửa file thực tế trên ổ cứng (để check nếu ảnh bị server ghi đè)
+            current_mtime = os.path.getmtime(img_path) if img_path and os.path.exists(img_path) else 0
+            
+            # Lấy dữ liệu cache hiện tại của ô này
+            cached_data = self.controller.cached_product_images.get(product_id)
+
+            # Điều kiện dùng lại ảnh trong RAM:
+            # 1. Có cache định dạng dict
+            # 2. Đường dẫn ảnh giống hệt nhau (tránh lỗi thay sản phẩm khác vào cùng ô)
+            # 3. File trên ổ cứng không bị thay đổi (tránh lỗi đổi ảnh nhưng giữ nguyên tên)
+            if (cached_data and isinstance(cached_data, dict) and 
+                cached_data.get("path") == img_path and 
+                cached_data.get("mtime") == current_mtime):
+                photo_img = cached_data.get("image")
+
+            # Nếu cache sai hoặc chưa có -> Tải lại từ ổ cứng
             if not photo_img and img_path and os.path.exists(img_path):
                 img = Image.open(img_path).resize(img_size, Image.Resampling.LANCZOS)
                 photo_img = ImageTk.PhotoImage(img)
-                self.controller.cached_product_images[product_id] = photo_img
+                # Lưu lại cache với cấu trúc mới (dict)
+                self.controller.cached_product_images[product_id] = {
+                    "path": img_path,
+                    "mtime": current_mtime,
+                    "image": photo_img
+                }
 
             if photo_img:
                 item_frame.config(image=photo_img, text=display_text,

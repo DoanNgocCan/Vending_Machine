@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 
 # --- CẤU HÌNH ---
-SERVER_URL = "http://192.168.1.23:5000"  # Thay bằng IP thật nếu server chạy trên máy khác. Giữ nguyên nếu server chạy cùng máy.
+SERVER_URL = "http://192.168.1.168:5000"  # Thay bằng IP thật nếu server chạy trên máy khác. Giữ nguyên nếu server chạy cùng máy.
 # QUAN TRỌNG: Đây là tên định danh của máy này. Mỗi máy phải có ID khác nhau.
 DEVICE_ID = "VENDING_MACHINE_01" 
 
@@ -76,6 +76,9 @@ class VendingAPIManager:
                 local_filename = f"{safe_name}.png"
 
             local_path = os.path.join(images_dir, local_filename)
+
+            if os.path.exists(local_path):
+                return local_path
 
             # Tải ảnh nếu chưa có hoặc để cập nhật
             response = requests.get(image_url, timeout=30, stream=True)

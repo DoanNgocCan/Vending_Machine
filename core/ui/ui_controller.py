@@ -135,6 +135,7 @@ class AdvancedUIManager:
         
         self._hide_system_taskbar()
         self.root.protocol("WM_DELETE_WINDOW", self.on_app_close)
+        self.root.bind_all("<Escape>", lambda event: self.on_app_close())
         
         # --- BẮT ĐẦU ỨNG DỤNG ---
         self.show_welcome_screen() # <--- Bắt đầu bằng màn hình chào mừng
@@ -466,10 +467,16 @@ class AdvancedUIManager:
                 # Kiểm tra xem đường dẫn ảnh có tồn tại trên máy client không
                 if img_path and os.path.exists(img_path):
                     try:
+                        current_mtime = os.path.getmtime(img_path)
                         img = Image.open(img_path)
                         img = img.resize(img_size, Image.Resampling.LANCZOS)
-                        # Lưu cache theo ID là Số Ô (slot)
-                        self.cached_product_images[slot] = ImageTk.PhotoImage(img)
+                        
+                        # LƯU Ý THAY ĐỔI Ở ĐÂY: Lưu dạng dictionary thay vì chỉ lưu đối tượng PhotoImage
+                        self.cached_product_images[slot] = {
+                            "path": img_path,
+                            "mtime": current_mtime,
+                            "image": ImageTk.PhotoImage(img)
+                        }
                     except Exception as e:
                         print(f"Lỗi tải ảnh sản phẩm '{item_name}' (Ô số {slot}): {e}")
                         self.cached_product_images[slot] = None
@@ -700,7 +707,29 @@ class AdvancedUIManager:
         self._deselect_product()
         self.status_message_var.set("✅ Đã xóa giỏ hàng")
         self.root.after(TEMP_MESSAGE_DURATION, lambda: self.status_message_var.set("Chọn sản phẩm để mua hàng"))
+    def return_to_welcome(self):
+        """
+        Nút THOÁT trên UI sẽ gọi hàm này để:
+        1. Xóa giỏ hàng.
+        2. Đăng xuất tài khoản khách hàng.
+        3. Quay về màn hình quảng cáo (Welcome Screen).
+        """
+        print("UI: Đang reset phiên làm việc và quay về màn hình chờ...")
+        
+        self.logic.cart.clear()
+        self.update_cart_display_handler()
+        self._deselect_product()
+        self.status_message_var.set("Chọn sản phẩm để mua hàng")
 
+        self.customer_info = None
+        self.customer_name = ""
+        self.points_used_in_transaction = 0
+        self.logic.set_customer(None) 
+        
+        self.update_welcome_message()
+        self._update_auth_frame_visibility()
+        
+        self.show_welcome_screen()
     def update_welcome_message(self):
         """Cập nhật lời chào với tên khách hàng"""
         if self.customer_name:
@@ -842,6 +871,16 @@ class AdvancedUIManager:
         
         print("UI: Bắt đầu quy trình đóng ứng dụng an toàn...")
         self.is_closing = True
+
+        try:
+            # Lấy danh sách tất cả các ID sự kiện 'after' đang chờ
+            pending_afters = self.root.tk.call('after', 'info')
+            for after_id in pending_afters:
+                self.root.after_cancel(after_id)
+            print("UI: Đã dọn dẹp sạch các bộ đếm thời gian chạy ngầm.")
+        except Exception as e:
+            print(f"UI: Lỗi dọn dẹp after events (có thể bỏ qua): {e}")
+            
         try:
             from core.features.mqtt_client import mqtt_manager
             mqtt_manager.disconnect()
