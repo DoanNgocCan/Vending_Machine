@@ -59,10 +59,10 @@ class LocalDatabaseManager:
                     CREATE TABLE IF NOT EXISTS inventory (
                         slot_number INTEGER PRIMARY KEY,
                         item_name TEXT,  -- CHÚ Ý: Đã xóa chữ UNIQUE ở đây
-                        price REAL DEFAULT 0,
+                        price INTEGER DEFAULT 0,
                         units_sold INTEGER DEFAULT 0,
                         units_left INTEGER DEFAULT 0,
-                        cost_price REAL DEFAULT 0,
+                        cost_price INTEGER DEFAULT 0,
                         reorder_point INTEGER DEFAULT 5,
                         description TEXT,
                         image_path TEXT,
@@ -89,7 +89,7 @@ class LocalDatabaseManager:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         timestamp TEXT,
                         order_code TEXT UNIQUE,
-                        total_amount REAL,
+                        total_amount INTEGER,
                         customer_name TEXT,
                         items_detail TEXT,
                         is_synced INTEGER DEFAULT 0
