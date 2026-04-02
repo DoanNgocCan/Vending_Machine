@@ -33,7 +33,7 @@ PRODUCT_IMAGES_CONFIG = {
 
 # --- Cấu hình MQTT ---
 # Có thể ghi đè bằng biến môi trường MQTT_BROKER_HOST và MQTT_BROKER_PORT
-MQTT_BROKER_HOST = "192.168.1.168"   #os.getenv("MQTT_BROKER_HOST", "localhost")
+MQTT_BROKER_HOST = "192.168.1.133"   #os.getenv("MQTT_BROKER_HOST", "localhost")
 MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
 
 # Topic MQTT cho cập nhật giá/số lượng nhanh (hot update)
