@@ -620,6 +620,7 @@ class AdvancedUIManager:
         
         # Lấy thông tin sản phẩm đang chọn
         product_id, name, price = self.selected_product
+        selected_slot = product_id
         
         # Kiểm tra tồn kho
         if self.selected_quantity > self.max_available_quantity:
@@ -643,7 +644,8 @@ class AdvancedUIManager:
                 'name': name,
                 'price': price,
                 'quantity': self.selected_quantity,
-                'total': price * self.selected_quantity
+                'total': price * self.selected_quantity,
+                'slot': selected_slot
             })
                 
         self.update_cart_display_handler()
@@ -836,13 +838,13 @@ class AdvancedUIManager:
                     if user: final_new_points = user['points']
 
                 # 2. Hardware LED
-                items_id_list = []
+                items_slot_list = []
                 for item in items_in_cart:
-                    items_id_list.extend([item['id']] * item['quantity'])
+                    items_slot_list.extend([item['slot']] * item['quantity'])
                 
                 try:
                     from core.drivers.PCF8574T import show_payment_leds
-                    show_payment_leds(items_id_list)
+                    show_payment_leds(items_slot_list)
                 except ImportError: pass
 
                 # 3. Sync Server

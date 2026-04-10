@@ -29,17 +29,17 @@ LED_PAUSE_DELAY = 0.1       # Thời gian nghỉ giữa các sản phẩm
 
 # LED Control Mapping
 # Mapping sản phẩm với byte điều khiển LED (12 LED với mã byte từ phần cứng)
-PRODUCT_LED_MAPPING: Dict[str, int] = {
-    "water":    0b00010001,  # P1  - Aquafina
-    "pepsi":    0b00010010,  # P2  - Pepsi
-    "sting":    0b00010100,  # P3  - Sting
-    "milo":     0b00011000,  # P4  - Milo Lon
-    "snackTC":  0b10010000,  # P5  - Snack Tôm Cay
-    "snackTBN": 0b01010000,  # P6  - Snack Tảo Biển Non
-    "snackH":   0b00100001,  # P7  - Snack Hành
-    "snackBN":  0b00100010,  # P8  - Snack Bắp Ngọt
-    "cookie":   0b00100100,  # P9  - Bánh Quy
-    "candy":    0b00101000   # P10 - Kẹo Dẻo
+SLOT_LED_MAPPING: Dict[str, int] = {
+    "1":  0b00010001,  # Khoang 1
+    "2":  0b00010010,  # Khoang 2
+    "3":  0b00010100,  # Khoang 3
+    "4":  0b00011000,  # Khoang 4
+    "5":  0b10010000,  # Khoang 5
+    "6":  0b01010000,  # Khoang 6
+    "7":  0b00100001,  # Khoang 7
+    "8":  0b00100010,  # Khoang 8
+    "9":  0b00100100,  # Khoang 9
+    "10": 0b00101000   # Khoang 10
 }
 
 # LED States
@@ -116,76 +116,56 @@ class PCF8574Controller:
         """
         return self.write_to_pcf8574(ALL_OFF_STATE)
     
-    def turn_on_product_led(self, product_id: str) -> bool:
+    def turn_on_product_led(self, slot_id: str) -> bool:
         """
         Turn on LED for a specific product.
         
         Args:
-            product_id (str): Product ID (from "1" to "12")
+            slot_id (str): Slot ID (from "1" to "10")
             
         Returns:
             bool: True if LED turned on successfully, False otherwise
         """
-        if product_id in PRODUCT_LED_MAPPING:
-            led_byte = PRODUCT_LED_MAPPING[product_id]
+        if slot_id in SLOT_LED_MAPPING:
+            led_byte = SLOT_LED_MAPPING[slot_id]
             success = self.write_to_pcf8574(led_byte)
             if success:
-                print(f"PCF8574T: Bật LED P{product_id} (0b{led_byte:08b}) cho sản phẩm {product_id}")
+                print(f"PCF8574T: Mở khoang {slot_id} (0b{led_byte:08b})")
             return success
         else:
-            print(f"PCF8574T: Không tìm thấy mapping cho sản phẩm {product_id}")
+            print(f"PCF8574T: Không tìm thấy mapping cho khoang {slot_id}")
             return False
     
-    def show_payment_success_sequence(self, purchased_products: List[str]) -> None:
-        """
-        Hiển thị chuỗi khoang hàng cho các sản phẩm đã mua.
-        
-        Args:
-            purchased_products (List[str]): Danh sách ID sản phẩm đã mua
-        """
+    def show_payment_success_sequence(self, purchased_slots: List[str]) -> None:
         if not self.is_initialized:
             print("PCF8574T: Chưa khởi tạo, bỏ qua mở khoang hàng")
             return
         
         def led_sequence() -> None:
-            """Internal function to run in separate thread."""
             try:
-                # Tắt tất cả khoang hàng trước
                 self.turn_off_all_leds()
-                time.sleep(0.01)
+                time.sleep(0.5)
                 
-                # Đếm số lượng từng loại sản phẩm
-                product_count: Dict[str, int] = {}
-                for product_id in purchased_products:
-                    product_count[product_id] = product_count.get(product_id, 0) + 1
+                # Đếm số lượng cần mở cho từng khoang
+                slot_count: Dict[str, int] = {}
+                for slot in purchased_slots:
+                    slot_count[slot] = slot_count.get(slot, 0) + 1
                 
-                print(f"PCF8574T: Hiển thị LED cho {len(product_count)} loại sản phẩm")
-                
-                # Mở khoang hàng cho từng loại sản phẩm đã mua
-                for product_id, quantity in product_count.items():
-                    if product_id in PRODUCT_IMAGES_CONFIG:
-                        product_name = PRODUCT_IMAGES_CONFIG[product_id][0]
-                        print(f"PCF8574T: {product_name} x{quantity} - LED {product_id}")
-                        
-                        # Mở khoang hàng cho sản phẩm này nhiều lần tương ứng với số lượng
-                        for _ in range(max(1, quantity)):
-                            self.turn_on_product_led(product_id)
-                            time.sleep(LED_BLINK_DELAY)
-                            self.turn_off_all_leds()
-                            time.sleep(LED_BLINK_DELAY)
-                        
-                        # Pause giữa các sản phẩm khác nhau
-                        time.sleep(LED_PAUSE_DELAY)
-                
-                print("PCF8574T: Hoàn thành hiển thị LED thanh toán")
-                
+                # Mở khoang trực tiếp, không check CONFIG nữa
+                for slot_id, quantity in slot_count.items():
+                    print(f"PCF8574T: Kích hoạt khoang {slot_id} x{quantity} lần")
+                    for _ in range(max(1, quantity)):
+                        self.turn_on_product_led(slot_id)
+                        time.sleep(LED_BLINK_DELAY)
+                        self.turn_off_all_leds()
+                        time.sleep(LED_BLINK_DELAY)
+                    
+                    time.sleep(LED_PAUSE_DELAY)
             except Exception as e:
                 print(f"PCF8574T: Lỗi trong chuỗi LED - {e}")
                 self.turn_off_all_leds()
-        
-        # Chạy mở khoang hàng trong thread riêng để không block UI
-        led_thread = threading.Thread(target=led_sequence, daemon=True)
-        led_thread.start()
+                
+        threading.Thread(target=led_sequence, daemon=True).start()
     
     def close(self) -> None:
         """

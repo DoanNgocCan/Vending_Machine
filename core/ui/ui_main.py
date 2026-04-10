@@ -152,12 +152,12 @@ class MainView:
     # ------------------------------------------------------------------
     # Sơ đồ 10 ô trên giao diện (row, col, rowspan, colspan)
     SLOT_LAYOUT = {
-        1: (2, 0, 2, 1),  # Ô 1: Trái, To
-        2: (2, 1, 1, 1),  # Ô 2: Giữa, Trên
-        3: (2, 2, 1, 1),  # Ô 3: Giữa, Trên
-        4: (2, 3, 2, 1),  # Ô 4: Phải, To
-        5: (3, 1, 1, 1),  # Ô 5: Giữa, Dưới
-        6: (3, 2, 1, 1),  # Ô 6: Giữa, Dưới
+        1: (2, 1, 1, 1),  # Ô 2: Giữa, Trên
+        2: (2, 2, 1, 1),  # Ô 3: Giữa, Trên
+        3: (2, 0, 2, 1),  # Ô 3: Trái, To
+        4: (3, 1, 1, 1),  # Ô 5: Giữa, Dưới
+        5: (3, 2, 1, 1),  # Ô 6: Giữa, Dưới
+        6: (2, 3, 2, 1),  # Ô 4: Phải, To
         7: (4, 0, 1, 1),  # Ô 7: Hàng cuối
         8: (4, 1, 1, 1),  # Ô 8: Hàng cuối
         9: (4, 2, 1, 1),  # Ô 9: Hàng cuối
@@ -186,7 +186,7 @@ class MainView:
         # 3. Quét qua đúng 10 ô vật lý
         for slot in range(1, 11):
             row, col, rowspan, colspan = self.SLOT_LAYOUT[slot]
-            product_info = current_stock.get(slot)
+            product_info = current_stock.get(slot) or current_stock.get(str(slot))
             
             # Vẽ giao diện cho từng ô
             self._create_slot_button(
@@ -220,7 +220,7 @@ class MainView:
         img_path = product_info["image_path"]
         current_price = product_info["price"]
         stock_qty = product_info["qty"]
-        product_id = slot 
+        product_id = str(slot)
 
         is_out_of_stock = stock_qty <= 0
 
@@ -366,7 +366,7 @@ class MainView:
         #static_key = static[0] if static else self._make_product_id(item_name)
         if not is_out_of_stock:
             btn.config(
-                command=lambda p=(current_slot, item_name, current_price), b=btn:
+                command=lambda p=(str(current_slot), item_name, current_price), b=btn:
                     self.controller.on_product_select(p, b)
             )
         else:
