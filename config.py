@@ -33,8 +33,10 @@ PRODUCT_IMAGES_CONFIG = {
 
 # --- Cấu hình MQTT ---
 # Có thể ghi đè bằng biến môi trường MQTT_BROKER_HOST và MQTT_BROKER_PORT
-MQTT_BROKER_HOST = "192.168.1.133"   #os.getenv("MQTT_BROKER_HOST", "localhost")
-MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+MQTT_BROKER_HOST = "mqtt.lavaa.qzz.io"
+MQTT_BROKER_PORT = 443  # Bắt buộc là 443 khi qua Cloudflare Tunnel, không dùng port mặc định 1883 được
+'''MQTT_BROKER_HOST = "192.168.1.133"   #os.getenv("MQTT_BROKER_HOST", "localhost")
+MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))'''
 
 # Topic MQTT cho cập nhật giá/số lượng nhanh (hot update)
 MQTT_TOPIC_PRODUCT_UPDATE = "vending_machine/product/update"

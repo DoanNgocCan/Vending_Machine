@@ -15,6 +15,7 @@ Chức năng:
 import json
 import logging
 import threading
+import ssl  # Thêm thư viện này để kết nối HTTPS/WSS
 
 try:
     import paho.mqtt.client as mqtt
@@ -73,31 +74,39 @@ class MQTTClientManager:
 
     def connect(self, broker=None, port=None):
         """
-        Kết nối tới MQTT broker.
-
-        Returns:
-            True nếu kết nối thành công, False nếu thất bại hoặc MQTT không khả dụng.
+        Kết nối tới MQTT broker qua WebSockets (Cloudflare Tunnel).
         """
         if not MQTT_AVAILABLE:
             logging.warning("MQTT: paho-mqtt không khả dụng, bỏ qua kết nối.")
             return False
 
-        broker = broker or MQTT_BROKER_HOST
-        port = port or MQTT_BROKER_PORT
+        # --- Ép dùng Domain Cloudflare và Cổng HTTPS ---
+        # (Cách tốt nhất là bạn nên vào file config.py để sửa 2 biến này)
+        broker = broker or "mqtt.lavaa.qzz.io"
+        port = port or 443  # Bắt buộc là 443 khi qua Cloudflare
 
         try:
+            # 1. THÊM tham số transport="websockets"
             try:
-                self._client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+                self._client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, transport="websockets")
             except AttributeError:
                 # paho-mqtt < 2.0 không có CallbackAPIVersion
-                self._client = mqtt.Client()
+                self._client = mqtt.Client(transport="websockets")
+            
             self._client.on_connect = self._on_connect
             self._client.on_message = self._on_message
             self._client.on_disconnect = self._on_disconnect
 
+            # 2. Cấu hình WebSocket path (để khớp với root path của Cloudflare Tunnel)
+            self._client.ws_set_options(path="/")
+
+            # 3. Kích hoạt SSL/TLS (Bắt buộc để đi qua WSS của Cloudflare)
+            self._client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
+
+            # Khởi tạo kết nối
             self._client.connect(broker, port, keepalive=60)
             self._client.loop_start()
-            logging.info(f"MQTT: Đang kết nối tới broker {broker}:{port}...")
+            logging.info(f"MQTT: Đang kết nối tới WSS broker {broker}:{port}...")
             return True
         except Exception as e:
             logging.warning(
