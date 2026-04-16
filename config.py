@@ -9,6 +9,9 @@ _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(_BASE_DIR, ".env"))
 
 
+DEVICE_ID = os.getenv("VENDING_DEVICE_ID", "VENDING_MACHINE_01")
+SERVER_URL = os.getenv("VENDING_SERVER_URL", "http://localhost:8000").rstrip("/")
+
 WINDOW_TITLE = "Máy bán hàng tự động" # Tiêu đề chung
 WINDOW_GEOMETRY = "1920x1080" # Kích thước mặc định, có thể bị override
 

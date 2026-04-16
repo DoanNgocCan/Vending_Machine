@@ -3,9 +3,7 @@ import requests
 import logging
 import os
 from datetime import datetime
-from dotenv import load_dotenv
-
-load_dotenv()
+from config import DEVICE_ID, SERVER_URL
 
 # --- CẤU HÌNH ---
 SERVER_URL = os.getenv("VENDING_SERVER_URL", "http://localhost:8000").rstrip("/")
@@ -14,7 +12,7 @@ DEVICE_ID = os.getenv("VENDING_DEVICE_ID", "VENDING_MACHINE_01")
 
 API_HEADERS = {
     'Content-Type': 'application/json',
-    'X-Device-ID': DEVICE_ID  # Server sẽ dựa vào đây để biết trừ kho máy nào
+    'X-Device-ID': DEVICE_ID  # Lấy trực tiếp từ config
 }
 
 class VendingAPIManager:

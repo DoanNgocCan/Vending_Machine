@@ -25,6 +25,7 @@ except ImportError:
     logging.warning("MQTT: Thư viện paho-mqtt chưa được cài đặt. Chức năng MQTT bị tắt.")
 
 from config import (
+    DEVICE_ID,
     MQTT_BROKER_HOST,
     MQTT_BROKER_PORT,
     MQTT_TOPIC_PRODUCT_UPDATE,
@@ -175,6 +176,12 @@ class MQTTClientManager:
 
     def _handle_product_update(self, payload):
         """Xử lý HOT UPDATE: Giá / Tồn kho / Tên sản phẩm"""
+        target_device = payload.get("device_id")
+
+        # 🛑 CHỐT CHẶN: Nếu Server có chỉ định máy nhận, mà không phải máy này -> BỎ QUA
+        if target_device and target_device != DEVICE_ID:
+            logging.info(f"MQTT: Bỏ qua bản tin vì dành cho máy khác ({target_device})")
+            return
         old_name = payload.get("old_name")
         new_name = payload.get("new_name")
         price = payload.get("price")
