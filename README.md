@@ -1,85 +1,107 @@
-# 🛒 Smart Vending Machine with AI Face Recognition
-### (Máy Bán Hàng Tự Động Thông Minh Tích Hợp Nhận Diện Khuôn Mặt)
+# Smart Vending Machine with AI Face Recognition
 
-![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
-![AI](https://img.shields.io/badge/AI-Face_Recognition-green)
-![GUI](https://img.shields.io/badge/GUI-CustomTkinter-orange)
+Python-based smart vending machine for kiosk/touchscreen use, integrated with:
+- Face recognition login/register flow
+- Local-first inventory and transaction storage (SQLite)
+- Background sync with server API
+- MQTT hot updates for product data
+- QR payment flow via PayOS
 
-## 👨‍💻 Authors (Tác giả)
+## Security Notice
+This project uses environment variables for sensitive/runtime values.
+- Real secrets must stay in `.env` (already ignored by `.gitignore`).
+- Use `.env.example` as a template for new deployments.
+- Do not commit personal data, credentials, or API keys.
 
-| Full Name (Họ và Tên) | Student ID (MSSV) | Role (Vai trò) |
-| :--- | :--- | :--- |
-| **Lê Trần Tùng Dương** | **22520299** | Developer |
-| **Đoàn Ngọc Cẩn** | **22520142** | Developer |
+## Quick Start (Raspberry Pi 5)
 
----
+### 1. System prerequisites
+Recommended OS: Raspberry Pi OS 64-bit (Bookworm).
 
-## 🇻🇳 TIẾNG VIỆT
+Install required system packages:
 
-### 📖 Giới thiệu
-Đây là dự án **Máy Bán Hàng Tự Động (Smart Vending Machine)** được phát triển trên nền tảng Python. Hệ thống tích hợp trí tuệ nhân tạo (AI) để nhận diện khuôn mặt khách hàng, cho phép đăng ký thành viên, đăng nhập nhanh chóng và thanh toán tích điểm. Dự án được thiết kế để chạy trên các thiết bị nhúng (như Raspberry Pi) với giao diện cảm ứng thân thiện.
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip python3-tk \
+  libatlas-base-dev libopenblas-dev libjpeg-dev zlib1g-dev \
+  libopenjp2-7 libtiff6 libxcb1 libxkbcommon0 libgtk-3-0 \
+  libgl1 libglib2.0-0 v4l-utils chromium-browser
+```
 
-### 🚀 Tính năng nổi bật
-* **AI Face Recognition:** Sử dụng **EdgeFace** và **FAISS** để trích xuất đặc trưng và tìm kiếm khuôn mặt tốc độ cao (Real-time).
-* **Face Detection:** Sử dụng **MediaPipe** để phát hiện và căn chỉnh khuôn mặt chính xác.
-* **Giao diện Kiosk (GUI):** Xây dựng bằng `Tkinter` và `CustomTkinter`, hỗ trợ màn hình cảm ứng, chế độ toàn màn hình.
-* **Quản lý bán hàng:** Chọn sản phẩm, giỏ hàng, tính tổng tiền, trừ kho cục bộ.
-* **Đồng bộ dữ liệu:** Cơ chế **Offline-First**. Dữ liệu được lưu tại `SQLite` local và tự động đồng bộ lên Server qua API khi có mạng.
-* **Đa luồng (Multi-threading):** Tách biệt luồng xử lý Camera/AI và luồng giao diện (UI) giúp ứng dụng mượt mà, không bị treo.
+Optional (for I2C hardware / PCF8574):
 
-### 🛠 Công nghệ sử dụng
-* **Ngôn ngữ:** Python 3.x
-* **Giao diện:** Tkinter, CustomTkinter, PIL
-* **AI/Computer Vision:** PyTorch, OpenCV, MediaPipe, FAISS, NumPy
-* **Database:** SQLite3
-* **Hardware Control:** GPIO (LEDs) thông qua driver `PCF8574T` (mô phỏng).
+```bash
+sudo apt install -y i2c-tools python3-smbus
+sudo raspi-config
+# Interface Options -> I2C -> Enable
+```
 
----
+### 2. Clone and create virtual environment
 
-## 🇬🇧 ENGLISH
+```bash
+git clone <your-repo-url>
+cd Vending_Machine_Project
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-### 📖 Introduction
-This is a **Smart Vending Machine** project developed using Python. The system integrates Artificial Intelligence (AI) for facial recognition, enabling customer registration, quick login, and loyalty point payments. The project is optimized for embedded devices (like Raspberry Pi) with a user-friendly touch interface.
+### 3. Configure environment variables
 
-### 🚀 Key Features
-* **AI Face Recognition:** Utilizes **EdgeFace** and **FAISS** for high-speed, real-time feature extraction and vector search.
-* **Face Detection:** Implements **MediaPipe** for accurate face detection and alignment.
-* **Kiosk Interface (GUI):** Built with `Tkinter` and `CustomTkinter`, supporting touchscreens and full-screen mode.
-* **Sales Management:** Product selection, shopping cart logic, total calculation, and local inventory deduction.
-* **Data Synchronization:** **Offline-First** architecture. Data is stored in local `SQLite` and automatically syncs to the Server via API when online.
-* **Multi-threading:** Separates Camera/AI processing threads from the UI thread to ensure a smooth, non-blocking user experience.
+```bash
+cp .env.example .env
+```
 
-### 🛠 Tech Stack
-* **Language:** Python 3.x
-* **GUI:** Tkinter, CustomTkinter, PIL
-* **AI/Computer Vision:** PyTorch, OpenCV, MediaPipe, FAISS, NumPy
-* **Database:** SQLite3
-* **Hardware Control:** GPIO (LEDs) via `PCF8574T` driver (simulated).
+Edit `.env` and set real values:
+- `VENDING_SERVER_URL`
+- `VENDING_DEVICE_ID`
+- `MQTT_BROKER_HOST`, `MQTT_BROKER_PORT`
+- `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, `PAYOS_CHECKSUM_KEY`
+- Optional local payment service settings (`FLASK_HOST`, `FLASK_PORT`, `FLASK_PUBLIC_BASE_URL`)
 
----
+### 4. Run application
 
-## 📂 Project Structure (Cấu trúc dự án)
+```bash
+source .venv/bin/activate
+python3 main.py
+```
+
+## Configuration Variables
+Main runtime variables now centralized via `.env`:
+
+- `VENDING_SERVER_URL`: backend API base URL
+- `VENDING_DEVICE_ID`: unique ID for each vending machine
+- `MQTT_BROKER_HOST`, `MQTT_BROKER_PORT`: broker connection settings
+- `MQTT_TOPIC_PRODUCT_UPDATE`, `MQTT_TOPIC_DATA_CHANGED`: MQTT topics
+- `PAYMENT_API_URL`: local endpoint used by UI to request payment links
+- `FLASK_HOST`, `FLASK_PORT`, `FLASK_PUBLIC_BASE_URL`: local Flask/PayOS callback settings
+- `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, `PAYOS_CHECKSUM_KEY`: PayOS credentials
+
+## Project Structure
 
 ```text
-📦 SHOPPING_KEYPAD_APP
- ┣ 📂 core
- ┃ ┣ 📂 Camera_AI
- ┃ ┃ ┣ 📂 backbones
- ┃ ┃ ┣ 📜 face_recognition_library.py  # Core AI logic (EdgeFace, FAISS)
- ┃ ┃ ┗ 📂 checkpoints                  # Contains AI Models (.pt files)
- ┃ ┣ 📂 database
- ┃ ┃ ┗ 📜 local_database_manager.py    # SQLite handler & Sync logic
- ┃ ┣ 📂 ui
- ┃ ┃ ┣ 📜 ui_controller.py             # Main App Controller
- ┃ ┃ ┣ 📜 ai_face_login_screen.py      # Face Login UI
- ┃ ┃ ┣ 📜 ai_face_register_screen.py   # Face Register UI
- ┃ ┃ ┣ 📜 ui_confirmation              
- ┃ ┃ ┣ 📜 ui_login
- ┃ ┃ ┣ 📜 ui_main
- ┃ ┃ ┣ 📜 ui_register
- ┃ ┃ ┣ 📜 ui_thankyou
- ┃ ┃ ┣ 📜 ui_welcome
- ┃ ┃ ┗ 
- ┣ 📜 config.py                        # Configuration settings
- ┣ 📜 main.py                   
- ┗ 📜 requirements.txt                 # Python dependencies
+Vending_Machine_Project/
+├── main.py
+├── config.py
+├── requirements.txt
+├── .env.example
+├── core/
+│   ├── Camera_AI/
+│   ├── database/
+│   ├── drivers/
+│   ├── features/
+│   └── ui/
+├── images/
+└── sounds/
+```
+
+## Notes for Production on Raspberry Pi 5
+- Set static IP or DHCP reservation for stable device identity.
+- Use a unique `VENDING_DEVICE_ID` per physical machine.
+- Keep `.env` backed up securely outside source control.
+- If running as kiosk, configure autostart and disable screen sleep.
+- Verify camera permissions and hardware acceleration if UI/video is laggy.
+
+## License
+This project is licensed under the MIT License. See `LICENSE`.

@@ -3,11 +3,14 @@ import requests
 import logging
 import os
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- CẤU HÌNH ---
-SERVER_URL = "https://vending-machine.lavaa.qzz.io/"  # Thay bằng IP thật nếu server chạy trên máy khác. Giữ nguyên nếu server chạy cùng máy.
+SERVER_URL = os.getenv("VENDING_SERVER_URL", "http://localhost:8000").rstrip("/")
 # QUAN TRỌNG: Đây là tên định danh của máy này. Mỗi máy phải có ID khác nhau.
-DEVICE_ID = "VENDING_MACHINE_01" 
+DEVICE_ID = os.getenv("VENDING_DEVICE_ID", "VENDING_MACHINE_01")
 
 API_HEADERS = {
     'Content-Type': 'application/json',
@@ -110,13 +113,14 @@ class VendingAPIManager:
         except requests.RequestException:
             return None
         
-    def register_customer(self, full_name, phone_number, birthday, password, user_id):
+    def register_customer(self, full_name, phone_number, email, password, confirm_password, user_id):
         endpoint = f"{SERVER_URL}/api/user/register"
         payload = {
             "full_name": full_name,
             "phone_number": phone_number,
-            "birthday": birthday,
+            "email": email,
             "password": password,
+            "confirm_password": confirm_password, # Thêm xác nhận mật khẩu
             "user_id": user_id
         }
         try:
@@ -124,22 +128,22 @@ class VendingAPIManager:
             response.raise_for_status()
             data = response.json()
             if data.get("success"):
-                return {"code": data['user_id'], "name": full_name, "phone": phone_number, "points": 0}
+                return {"code": data['user_id'], "name": full_name, "phone": phone_number, "email": email, "points": 0}
             logging.error(f"API: Đăng ký thất bại. Server: {data.get('message')}")
             return None
         except requests.RequestException as e:
             logging.error(f"API: Lỗi mạng khi đăng ký: {e}")
             return None
 
-    def login_customer(self, phone_number, password):
+    def login_customer(self, login_id, password):
         endpoint = f"{SERVER_URL}/api/user/login"
-        payload = {"phone_number": phone_number, "password": password}
+        payload = {"login_id": login_id, "password": password} # Gửi login_id thay vì phone_number
         try:
             response = requests.post(endpoint, json=payload, headers=API_HEADERS, timeout=15)
             if response.status_code == 200:
                 data = response.json()
                 if data.get("success"):
-                    logging.info(f"API: Đăng nhập thành công cho SĐT {phone_number}")
+                    logging.info(f"API: Đăng nhập thành công cho ID {login_id}")
                     return data.get('user')
             
             logging.warning(f"API: Đăng nhập thất bại. Status: {response.status_code}")
@@ -147,7 +151,7 @@ class VendingAPIManager:
         except requests.RequestException as e:
             logging.error(f"API: Lỗi mạng khi đăng nhập: {e}")
             return None
-
+        
     def report_transaction(self, total_amount, items_list, customer_info=None):
         """
         Gửi giao dịch lên server.

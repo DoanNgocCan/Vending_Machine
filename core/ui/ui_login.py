@@ -6,7 +6,7 @@ from tkinter import messagebox
 
 class LoginScreen(tk.Toplevel):
     """
-    Màn hình đăng nhập bằng SĐT/Mật khẩu hoặc Khuôn mặt.
+    Màn hình đăng nhập bằng SĐT/Email/Mật khẩu hoặc Khuôn mặt.
     """
     def __init__(self, parent, controller):
         super().__init__(parent)
@@ -42,8 +42,9 @@ class LoginScreen(tk.Toplevel):
         form_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
         form_frame.pack(pady=10, padx=40, fill="x")
 
-        self.phone_entry = ctk.CTkEntry(form_frame, placeholder_text="Số điện thoại", font=("Arial", 16), height=48, corner_radius=10)
-        self.phone_entry.pack(fill="x", pady=(0, 15))
+        # Đổi chỗ này thành Nhập SĐT hoặc Email
+        self.login_id_entry = ctk.CTkEntry(form_frame, placeholder_text="Số điện thoại hoặc Email", font=("Arial", 16), height=48, corner_radius=10)
+        self.login_id_entry.pack(fill="x", pady=(0, 15))
 
         password_frame = ctk.CTkFrame(form_frame, fg_color="transparent")
         password_frame.pack(fill="x") 
@@ -67,7 +68,7 @@ class LoginScreen(tk.Toplevel):
         self.message_label = ctk.CTkLabel(content_frame, text="", font=("Arial", 14), text_color="red")
         self.message_label.pack(pady=(0, 10), padx=40, fill="x")
 
-        input_widgets = [self.phone_entry, self.password_entry]
+        input_widgets = [self.login_id_entry, self.password_entry]
         background_widgets = [self, content_frame, form_frame, face_id_button, forgot_password_button, self.login_button, cancel_button, self.message_label]
         for child in content_frame.winfo_children() + form_frame.winfo_children():
             if isinstance(child, ctk.CTkLabel):
@@ -76,7 +77,7 @@ class LoginScreen(tk.Toplevel):
         for widget in input_widgets:
             widget.bind("<FocusIn>", self.controller._handle_focus_in)
     
-        self.phone_entry.bind("<Return>", lambda e: self.password_entry.focus_set())
+        self.login_id_entry.bind("<Return>", lambda e: self.password_entry.focus_set())
         self.password_entry.bind("<Return>", lambda e: self._handle_login())
 
         for widget in background_widgets:
@@ -92,16 +93,17 @@ class LoginScreen(tk.Toplevel):
 
     def _handle_login(self):
         self.controller._hide_keyboard()
-        phone = self.phone_entry.get().strip()
+        login_id = self.login_id_entry.get().strip()
         password = self.password_entry.get().strip()
-        if not phone or not password:
+        if not login_id or not password:
             self.message_label.configure(text="Vui lòng nhập đầy đủ thông tin.", text_color="red")
             return
         
         self.login_button.configure(state="disabled", text="Đang xử lý...")
         self.update()
         
-        user_data = self.controller.db_manager.login_customer(phone, password)
+        # Gọi db_manager local (đã sửa nhận login_id ở bước trước)
+        user_data = self.controller.db_manager.login_customer(login_id, password)
         
         if user_data:
             print("LOGIN: Đăng nhập thành công từ CSDL local.")
@@ -110,7 +112,8 @@ class LoginScreen(tk.Toplevel):
             return
         
         print("LOGIN: Đăng nhập local thất bại, thử đăng nhập qua API server...")
-        server_user_data = self.controller.api_manager.login_customer(phone, password)
+        # Gọi api_manager server
+        server_user_data = self.controller.api_manager.login_customer(login_id, password)
         
         if server_user_data:
             print("LOGIN: Đăng nhập server thành công. Đang lưu/cập nhật dữ liệu về local...")
@@ -119,16 +122,16 @@ class LoginScreen(tk.Toplevel):
                 "code": server_user_data.get('user_id'),
                 "name": server_user_data.get('full_name'),
                 "phone": server_user_data.get('phone_number'),
+                "email": server_user_data.get('email'),
                 "points": server_user_data.get('points')
             }
             self._login_successful_callback(client_user_data)
         else:
             print("LOGIN: Đăng nhập thất bại trên cả local và server.")
-            self.message_label.configure(text="Sai SĐT hoặc mật khẩu. Vui lòng thử lại.", text_color="red")
+            self.message_label.configure(text="Sai thông tin đăng nhập. Vui lòng thử lại.", text_color="red")
             self.login_button.configure(state="normal", text="Đăng Nhập")
 
     def _verify_with_server_task(self, user_data):
-        """(CHẠY TRÊN LUỒNG NỀN)"""
         print(f"VERIFY: Đối chiếu thông tin user {user_data['name']} với server...")
         server_data = self.controller.api_manager.get_customer_by_id(user_data['code'])
         if server_data is None:
@@ -139,13 +142,11 @@ class LoginScreen(tk.Toplevel):
             self.controller.db_manager.add_or_update_customer_from_server(server_data)
 
     def _login_successful_callback(self, customer_data):
-        """Gọi lại controller để xử lý logic đăng nhập thành công"""
         self.message_label.configure(text=f"Đăng nhập thành công! Chào {customer_data['name']}.", text_color="green")
         self.controller.handle_login_success(customer_data)
         self.after(1500, self.destroy)
 
     def _handle_face_login(self):
-        """Yêu cầu controller hiển thị màn hình loading để nhận diện."""
         self.controller._hide_keyboard()
         self.withdraw()
         self.controller.show_loading_screen()
@@ -153,10 +154,10 @@ class LoginScreen(tk.Toplevel):
 
     def _handle_forgot_password(self):
         self.controller._hide_keyboard()
-        dialog = ctk.CTkInputDialog(text="Nhập số điện thoại đã đăng ký:", title="Quên Mật Khẩu")
-        phone_number = dialog.get_input()
-        if phone_number:
-            messagebox.showinfo("Demo", f"Chức năng quên mật khẩu cho SĐT: {phone_number} (chưa được triển khai)")
+        dialog = ctk.CTkInputDialog(text="Nhập SĐT hoặc Email đã đăng ký:", title="Quên Mật Khẩu")
+        input_data = dialog.get_input()
+        if input_data:
+            messagebox.showinfo("Demo", f"Chức năng quên mật khẩu cho: {input_data} (chưa được triển khai)")
 
     def _cancel_login(self):
         self.controller._hide_keyboard()

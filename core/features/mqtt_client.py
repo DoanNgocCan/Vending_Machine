@@ -80,10 +80,9 @@ class MQTTClientManager:
             logging.warning("MQTT: paho-mqtt không khả dụng, bỏ qua kết nối.")
             return False
 
-        # --- Ép dùng Domain Cloudflare và Cổng HTTPS ---
-        # (Cách tốt nhất là bạn nên vào file config.py để sửa 2 biến này)
-        broker = broker or "mqtt.lavaa.qzz.io"
-        port = port or 443  # Bắt buộc là 443 khi qua Cloudflare
+        # Ưu tiên giá trị truyền vào hàm, nếu không có thì dùng từ config/.env
+        broker = broker or MQTT_BROKER_HOST
+        port = port or MQTT_BROKER_PORT
 
         try:
             # 1. THÊM tham số transport="websockets"

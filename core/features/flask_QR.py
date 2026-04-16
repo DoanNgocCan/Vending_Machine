@@ -8,6 +8,10 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+FLASK_HOST = os.getenv("FLASK_HOST", "127.0.0.1")
+FLASK_PORT = int(os.getenv("FLASK_PORT", "5000"))
+FLASK_PUBLIC_BASE_URL = os.getenv("FLASK_PUBLIC_BASE_URL", f"http://{FLASK_HOST}:{FLASK_PORT}")
+
 # Cấu hình PayOS
 
 #QR cua LAN
@@ -18,7 +22,7 @@ checksum_key = os.getenv("PAYOS_CHECKSUM_KEY")
 payos = PayOS(client_id, api_key, checksum_key)
 
 app = Flask(__name__, static_url_path="", static_folder="public")
-YOUR_DOMAIN = "http://localhost:5000"
+YOUR_DOMAIN = FLASK_PUBLIC_BASE_URL.rstrip("/")
 
 # Hàng đợi dùng để gửi tín hiệu từ Flask về Tkinter
 shared_queue = None
@@ -94,7 +98,7 @@ def create_payment_link():
 
 def run_flask_app():
     """Chạy Flask app - tương thích với code cũ"""
-    app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False)
+    app.run(host=FLASK_HOST, port=FLASK_PORT, debug=False, use_reloader=False)
 
 # Cho phép main.py gọi set_shared_queue và run_flask_app
 __all__ = ["app", "set_shared_queue", "run_flask_app"]

@@ -11,7 +11,7 @@ import os
 import queue
 
 class AIFaceRegistrationScreen(tk.Toplevel):
-    def __init__(self, parent, controller, local_user_id, name, phone, dob, password, original_register_window):
+    def __init__(self, parent, controller, local_user_id, name, phone, email, password, original_register_window):
         super().__init__(parent)
         self.controller = controller
         self.controller.start_camera_service()
@@ -19,7 +19,7 @@ class AIFaceRegistrationScreen(tk.Toplevel):
         self.local_user_id = local_user_id
         self.name = name
         self.phone = phone
-        self.dob = dob
+        self.email = email
         self.password = password
         self.original_register_window = original_register_window
         
@@ -169,7 +169,7 @@ class AIFaceRegistrationScreen(tk.Toplevel):
             )
             threading.Thread(
                 target=self.controller._background_registration_and_embedding,
-                args=(self.name, self.phone, self.dob, self.password, self.original_register_window, self.local_user_id),
+                args=(self.name, self.phone, self.email, self.password, self.original_register_window, self.local_user_id),
                 daemon=True
             ).start()
             self.after(1500, self.destroy) 

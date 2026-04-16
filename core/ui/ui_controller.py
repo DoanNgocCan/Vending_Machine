@@ -23,7 +23,7 @@ from core.Camera_AI.face_recognition_library import FaceRecognitionSystemWebcam
 from core.features.shopping_logic import ShoppingLogic
 from core.database.local_database_manager import db_manager
 from core.drivers.audio_driver import AudioDriver
-from config import TEMP_MESSAGE_DURATION, IMAGE_BASE_PATH, PRODUCT_IMAGES_CONFIG, AD_IMAGES_CONFIG
+from config import TEMP_MESSAGE_DURATION, IMAGE_BASE_PATH, AD_IMAGES_CONFIG
 
 # --- Imports các màn hình UI đã tách ---
 from core.ui.ui_welcome import WelcomeScreen
@@ -45,10 +45,6 @@ class AdvancedUIManager:
     BRIGHTNESS_MIN = 40
     BRIGHTNESS_MAX = 210
     
-    # --- Biến toàn cục (để dùng chung) ---
-    PRODUCT_IMAGES_CONFIG = PRODUCT_IMAGES_CONFIG
-
-
     def __init__(self, root, shopping_logic_instance, api_manager_instance):
         self.root = root
         self.logic = shopping_logic_instance
@@ -171,11 +167,11 @@ class AdvancedUIManager:
         """Hiển thị màn hình đăng ký."""
         RegisterScreen(self.root, self) 
         self.root.withdraw()
-    def show_face_capture_screen(self, local_user_id, name, phone, dob, password, original_register_window):
+    def show_face_capture_screen(self, local_user_id, name, phone, email, password, original_register_window):
         """
         Hiển thị màn hình chụp ảnh (được gọi bởi RegisterScreen).
         """
-        AIFaceRegistrationScreen(self.root, self, local_user_id, name, phone, dob, password, original_register_window)
+        AIFaceRegistrationScreen(self.root, self, local_user_id, name, phone, email, password, original_register_window)
 
     def _show_confirmation_screen(self):
         """
@@ -257,7 +253,7 @@ class AdvancedUIManager:
         self._update_auth_frame_visibility()
 
 
-    def _background_registration_and_embedding(self, name, phone, dob, password, register_window, local_user_id):
+    def _background_registration_and_embedding(self, name, phone, email, password, register_window, local_user_id):
         """
         (CHẠY TRÊN LUỒNG NỀN)
         Hàm này được gọi bởi AIFaceRegistrationScreen SAU KHI chụp ảnh.
@@ -276,7 +272,7 @@ class AdvancedUIManager:
                 
             sync_thread = threading.Thread(
                 target=db_manager.sync_customer_to_server,
-                args=(name, phone, dob, password, local_user_id),
+                args=(name, phone, email, password, local_user_id),
                 daemon=True
             )
             sync_thread.start()

@@ -5,6 +5,11 @@ import tkinter as tk
 import customtkinter as ctk
 import requests
 import json
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+PAYMENT_API_URL = os.getenv("PAYMENT_API_URL", "http://localhost:5000/create-payment-link")
 
 class ConfirmationScreen(tk.Toplevel):
     """
@@ -313,7 +318,7 @@ class ConfirmationScreen(tk.Toplevel):
         # --- 3. Gọi API ---
         try:
             response = requests.post(
-                "http://localhost:5000/create-payment-link", 
+                PAYMENT_API_URL,
                 json=payload, 
                 timeout=10
             )

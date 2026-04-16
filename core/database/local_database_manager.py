@@ -45,7 +45,7 @@ class LocalDatabaseManager:
                         user_id TEXT PRIMARY KEY,
                         full_name TEXT NOT NULL,
                         phone_number TEXT UNIQUE NOT NULL,
-                        birthday TEXT,
+                        email TEXT UNIQUE,     -- Thêm email, xóa birthday
                         password TEXT,
                         points INTEGER DEFAULT 0,
                         face_encoding BLOB,
@@ -112,42 +112,34 @@ class LocalDatabaseManager:
             logging.error(f"Lỗi khi xóa user {user_id}: {e}")
             return False
         
-    def register_customer(self, name, phone, dob, password, face_encoding=None):
+    def register_customer(self, name, phone, email, password, face_encoding=None): # Đổi dob -> email
         try:
             with self._get_connection() as con:
                 cur = con.cursor()
-                cur.execute("SELECT 1 FROM customers WHERE phone_number = ?", (phone,))
+                cur.execute("SELECT 1 FROM customers WHERE phone_number = ? OR email = ?", (phone, email))
                 if cur.fetchone():
-                    return {"error": "duplicate_phone"}
+                    return {"error": "duplicate_phone_or_email"}
         except sqlite3.Error:
             pass 
         user_id = f"local_{uuid.uuid4().hex[:8]}"
         created_at = datetime.now().isoformat()
         
-        sql = "INSERT INTO customers (user_id, full_name, phone_number, birthday, password, created_at, face_encoding, is_synced) VALUES (?, ?, ?, ?, ?, ?, ?, 0)"
+        # Đổi birthday -> email
+        sql = "INSERT INTO customers (user_id, full_name, phone_number, email, password, created_at, face_encoding, is_synced) VALUES (?, ?, ?, ?, ?, ?, ?, 0)"
         try:
             with self._get_connection() as con:
-                con.execute(sql, (user_id, name, phone, dob, password, created_at, face_encoding))
+                con.execute(sql, (user_id, name, phone, email, password, created_at, face_encoding))
                 con.commit()
             logging.info(f"Đã đăng ký thành công cho: {name}")
-            return {"code": user_id, "name": name, "phone": phone, "points": 0}
+            return {"code": user_id, "name": name, "phone": phone, "email": email, "points": 0}
         except sqlite3.IntegrityError:
-            return {"error": "duplicate_phone"}
+            return {"error": "duplicate_phone_or_email"}
         except sqlite3.Error as e:
             logging.error(f"Lỗi DB khi đăng ký khách hàng: {e}")
             return {"error": "db_error"}
 
-    def sync_customer_to_server(self, name, phone, dob, password, user_id):
+    def sync_customer_to_server(self, name, phone, email, password, user_id): # Đổi dob -> email
         logging.info(f"SYNC: Bắt đầu đồng bộ user '{name}' (local_id={user_id})...")
-        dob_for_api = None
-        if dob:
-            sep = '/' if '/' in dob else '-'
-            try:
-                parts = dob.split(sep)
-                day, month, year = (parts[0], parts[1], parts[2]) if len(parts[0]) == 2 else (parts[2], parts[1], parts[0])
-                dob_for_api = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
-            except Exception:
-                dob_for_api = None
 
         try:
             from core.features.api_manager import api_manager
@@ -155,7 +147,8 @@ class LocalDatabaseManager:
             logging.error(f"SYNC: Không import được api_manager: {e}")
             return
 
-        server_customer = api_manager.register_customer(name, phone, dob_for_api, password, user_id)
+        # Gọi API đăng ký (truyền password 2 lần do server đòi confirm_password)
+        server_customer = api_manager.register_customer(name, phone, email, password, password, user_id)
         
         if not server_customer:
             logging.error(f"SYNC: Đồng bộ user '{name}' thất bại.")
@@ -306,17 +299,19 @@ class LocalDatabaseManager:
                     count = 0
                     for user in server_users:
                         con.execute("""
-                            INSERT INTO customers (user_id, full_name, phone_number, points, is_synced)
-                            VALUES (?, ?, ?, ?, 1)
+                            INSERT INTO customers (user_id, full_name, phone_number, email, points, is_synced)
+                            VALUES (?, ?, ?, ?, ?, 1)
                             ON CONFLICT(user_id) DO UPDATE SET
                                 full_name = excluded.full_name,
                                 phone_number = excluded.phone_number,
+                                email = excluded.email,
                                 points = excluded.points,
                                 is_synced = 1
                         """, (
                             user['user_id'],
                             user.get('full_name', ''),
                             user.get('phone_number', ''),
+                            user.get('email', ''),
                             user.get('points', 0),
                         ))
                         count += 1
@@ -419,20 +414,21 @@ class LocalDatabaseManager:
             logging.error(f"❌ Lỗi sync_products_from_server: {e}")
             return False
         
-    def login_customer(self, phone, password_input):
-        sql = "SELECT * FROM customers WHERE phone_number = ?"
+    def login_customer(self, login_id, password_input): # Đổi phone -> login_id
+        sql = "SELECT * FROM customers WHERE phone_number = ? OR email = ?"
         try:
             with self._get_connection() as con:
                 cursor = con.cursor()
-                cursor.execute(sql, (phone,))
+                cursor.execute(sql, (login_id, login_id))
                 user_row = cursor.fetchone()
 
                 if user_row and user_row['password'] == password_input:
-                    logging.info(f"Đăng nhập thành công cho SĐT: {phone}")
+                    logging.info(f"Đăng nhập thành công cho: {login_id}")
                     return {
                         "code": user_row['user_id'],
                         "name": user_row['full_name'],
                         "phone": user_row['phone_number'],
+                        "email": user_row.get('email'),
                         "points": user_row['points']
                     }
                 else:
@@ -510,11 +506,12 @@ class LocalDatabaseManager:
             return False
             
         sql = """
-            INSERT INTO customers (user_id, full_name, phone_number, points, is_synced, password, created_at)
-            VALUES (?, ?, ?, ?, 1, 'synced_from_server', ?)
+            INSERT INTO customers (user_id, full_name, phone_number, email, points, is_synced, password, created_at)
+            VALUES (?, ?, ?, ?, ?, 1, 'synced_from_server', ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 full_name = excluded.full_name,
                 phone_number = excluded.phone_number,
+                email = excluded.email,
                 points = excluded.points,
                 is_synced = 1;
         """
@@ -524,6 +521,7 @@ class LocalDatabaseManager:
                     user_id,
                     server_user_data.get('full_name'),
                     server_user_data.get('phone_number'),
+                    server_user_data.get('email'), 
                     server_user_data.get('points', 0),
                     datetime.now().isoformat()
                 ))
@@ -531,7 +529,7 @@ class LocalDatabaseManager:
             return True
         except sqlite3.Error as e:
             logging.error(f"Lỗi khi thêm/cập nhật user từ server: {e}")
-            return False    
+            return False
 
     def generate_order_code(self):
         now = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -623,31 +621,6 @@ class LocalDatabaseManager:
         except sqlite3.Error as e:
             logging.error(f"Lỗi khi cập nhật điểm cho user {user_id}: {e}")
             return False
-    
-    def initialize_inventory(self):
-        try:
-            from config import PRODUCT_IMAGES_CONFIG
-        except ImportError:
-            return
-
-        try:
-            with self._get_connection() as con:
-                cursor = con.cursor()
-                count = 0
-                for key, (name, image_file, default_price) in PRODUCT_IMAGES_CONFIG.items():
-                    cursor.execute("""
-                        INSERT OR IGNORE INTO inventory 
-                        (item_name, price, units_left, units_sold, cost_price, reorder_point, description)
-                        VALUES (?, ?, 50, 0, 0, 5, ?)
-                    """, (name, default_price, f"Image: {image_file}"))
-                    
-                    if cursor.rowcount > 0:
-                        count += 1
-                con.commit()
-                if count > 0:
-                    logging.info(f"Initialized local inventory with {count} items.")
-        except sqlite3.Error as e:
-            logging.error(f"Lỗi initialize_inventory: {e}")
 
     def get_customer_by_id(self, user_id):
         if not user_id: return None

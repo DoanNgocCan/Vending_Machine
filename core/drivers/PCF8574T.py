@@ -12,7 +12,6 @@ import smbus2
 import time
 import threading
 from typing import List, Dict, Optional
-from config import PRODUCT_IMAGES_CONFIG
 
 
 # ================================
