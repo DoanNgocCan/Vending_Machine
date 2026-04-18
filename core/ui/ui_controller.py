@@ -105,6 +105,7 @@ class AdvancedUIManager:
         self.keyboard_process = None 
         self.keyboard_launched = False
         self.hide_keyboard_timer = None
+        self.keyboard_visible_state = False
         
         self.is_closing = False
         self.enable_post_register_embedding = True
@@ -401,11 +402,18 @@ class AdvancedUIManager:
             print("Cảnh báo: Không thể gửi lệnh 'Hide' qua D-Bus.")
 
     def _cleanup_keyboard(self):
-        print("Dọn dẹp cuối cùng: Tắt tất cả tiến trình 'onboard'...")
+        print("Dọn dẹp bàn phím: Tắt hoàn toàn tiến trình 'onboard'...")
         try:
             subprocess.run(['pkill', 'onboard'], check=False)
         except FileNotFoundError:
             print("Cảnh báo: Lệnh 'pkill' không tìm thấy.")
+        finally:
+            # Reset lại toàn bộ cờ trạng thái để lần sau mở lại nó sẽ tự khởi động lại
+            self.keyboard_launched = False
+            self.keyboard_visible_state = False
+            if self.hide_keyboard_timer:
+                self.root.after_cancel(self.hide_keyboard_timer)
+                self.hide_keyboard_timer = None
 
     def _handle_focus_in(self, event):
         if self.hide_keyboard_timer:

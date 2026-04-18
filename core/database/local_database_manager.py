@@ -428,13 +428,13 @@ class LocalDatabaseManager:
                         "code": user_row['user_id'],
                         "name": user_row['full_name'],
                         "phone": user_row['phone_number'],
-                        "email": user_row.get('email'),
+                        "email": user_row['email'],
                         "points": user_row['points']
                     }
                 else:
                     return None
         except Exception as e:
-            logging.error(f"Lỗi DB khi đăng nhập: {e}", exc_info=True)
+            logging.error(f"Lỗi DB khi đăng nhập: {e}")
             return None
     
     def update_customer_points_exact(self, user_id, new_points):

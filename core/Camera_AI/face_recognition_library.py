@@ -11,22 +11,33 @@ import threading
 import queue
 from collections import Counter
 import mediapipe as mp
-try:
-    # Import tương đối, giả định backbones.py nằm cùng thư mục
-    from .backbones import get_model
-except ImportError:
-    print("LỖI: Không thể import 'get_model' từ 'backbones.py'.")
-    print("Vui lòng đảm bảo file 'backbones.py' nằm chung thư mục với file này.")
-    # Thử import trực tiếp nếu chạy như script
-    try:
-        from backbones import get_model
-    except ImportError:
-        print("LỖI: Import trực tiếp 'backbones.py' cũng thất bại.")
-        exit()
-
+from .backbones import get_model
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 MODULE_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+import sys
+
+# Đường dẫn đến thư mục chứa file hiện tại
+MODULE_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+# 1. Thêm thư mục 'anti_spoofing' vào sys.path
+anti_spoofing_dir = os.path.join(MODULE_ROOT, 'anti_spoofing')
+if anti_spoofing_dir not in sys.path:
+    sys.path.append(anti_spoofing_dir)
+
+# 2. Import các module cần thiết (Lưu ý: Thêm lớp Detection vào dòng import)
+from src.anti_spoof_predict import AntiSpoofPredict, Detection
+from src.generate_patches import CropImage
+from src.utility import parse_model_name
+
+# =====================================================================
+# 3. VÁ LỖI TẢI RETINAFACE (VÔ HIỆU HÓA LỚP DETECTION GỐC)
+# Ghi đè hàm __init__ của Detection thành rỗng (lambda self: None).
+# Nhờ vậy AntiSpoofPredict sẽ KHÔNG tìm file .prototxt và .caffemodel nữa,
+# giúp tiết kiệm được hàng trăm MB RAM và load cực nhanh trên Pi 5!
+# =====================================================================
+Detection.__init__ = lambda self: None
 
 # ===============
 # CÁC CLASS LOGIC 
@@ -300,6 +311,60 @@ class MediaPipeFaceDetector:
         except Exception as e:
             print(f"[DETECT] Lỗi MediaPipe: {e}")
             return []
+
+class LivenessDetector:
+    def __init__(self, model_dir="anti_spoofing/resources/anti_spoof_models", device_id=0):
+        print("[LIVENESS] Đang tải mô hình chống giả mạo...")
+        self.model_dir = os.path.join(MODULE_ROOT, model_dir)
+        self.model_test = AntiSpoofPredict(device_id) # Sẽ tự động dùng CPU trên Pi
+        self.image_cropper = CropImage()
+        self.models = [m for m in os.listdir(self.model_dir) if "MiniFASNet" in m]
+        print(f"[LIVENESS] Đã tải {len(self.models)} model chống giả mạo.")
+
+    def check_liveness(self, frame_bgr, bbox):
+        """
+        bbox từ MediaPipe là (x1, y1, x2, y2).
+        Hàm này yêu cầu [x, y, w, h] và cần padding một chút vì MediaPipe box quá chật.
+        """
+        h_img, w_img, _ = frame_bgr.shape
+        x1, y1, x2, y2 = bbox
+        
+        # Mở rộng bbox của MediaPipe (khoảng 15-20%) để giống với RetinaFace
+        w_box = x2 - x1
+        h_box = y2 - y1
+        x1 = max(0, x1 - int(w_box * 0.1))
+        y1 = max(0, y1 - int(h_box * 0.15))
+        x2 = min(w_img, x2 + int(w_box * 0.1))
+        y2 = min(h_img, y2 + int(h_box * 0.1))
+        
+        # Chuyển sang định dạng [x, y, w, h]
+        fas_bbox = [x1, y1, x2 - x1, y2 - y1]
+        
+        prediction = np.zeros((1, 3))
+        for model_name in self.models:
+            h_input, w_input, model_type, scale = parse_model_name(model_name)
+            param = {
+                "org_img": frame_bgr,
+                "bbox": fas_bbox,
+                "scale": scale,
+                "out_w": w_input,
+                "out_h": h_input,
+                "crop": True,
+            }
+            if scale is None:
+                param["crop"] = False
+            
+            img = self.image_cropper.crop(**param)
+            prediction += self.model_test.predict(img, os.path.join(self.model_dir, model_name))
+            
+        prediction = prediction / len(self.models)
+        label = np.argmax(prediction)
+        score = prediction[0][label]
+        
+        # Label 1 là Mặt Thật, 0 và 2 là Mặt Giả
+        is_real = (label == 1) 
+        return is_real, score
+
 # =========================================================================
 # CLASS THƯ VIỆN CHÍNH
 # =========================================================================
@@ -307,13 +372,11 @@ class MediaPipeFaceDetector:
 class FaceRecognitionSystemWebcam:
     # --- CẤU HÌNH ---
     
-    # --- TỐI ƯU 4: Sửa đường dẫn ---
     # Chỉ định tên model
     MODEL_NAME = "edgeface_base"
     # Chỉ định thư mục database (sẽ được join với MODULE_ROOT)
     DATABASE_DIR_NAME = os.path.join(MODULE_ROOT, 'database')
     
-    # --- TỐI ƯU 1: GIẢM ĐỘ TRỄ ---
     # Chỉ giữ frame mới nhất để giảm độ trễ
     IMAGE_QUEUE_SIZE = 1 
     
@@ -322,12 +385,12 @@ class FaceRecognitionSystemWebcam:
         
         self.latest_frame_for_display = None
 
-        # --- TỐI ƯU 4: Sửa đường dẫn ---
         # Tạo đường dẫn tuyệt đối cho thư mục database
         self.DATABASE_BACKUP_DIR = os.path.join(MODULE_ROOT, self.DATABASE_DIR_NAME)
         os.makedirs(self.DATABASE_BACKUP_DIR, exist_ok=True) # Đảm bảo thư mục tồn tại
 
         self.detector = MediaPipeFaceDetector()
+        self.liveness = LivenessDetector()  
         self.recognizer = ModelEmbedding(self.MODEL_NAME)
         self.searcher = FastFaceSearch(self.recognizer, self.MODEL_NAME, self.DATABASE_BACKUP_DIR)
         
@@ -428,13 +491,6 @@ class FaceRecognitionSystemWebcam:
     # CHỨC NĂNG 1: ĐĂNG KÝ KHÁCH HÀNG
     # =========================================================================
     def register_customer(self, customer_name, num_images_to_capture=100, progress_callback=None, stop_flag_check=None):
-        """
-        Phiên bản Hybrid:
-        - Tính toán AI (Embedding) NGAY LẬP TỨC trong vòng lặp chụp.
-        - Lưu ảnh vào RAM buffer.
-        - Chỉ ghi xuống ổ cứng (I/O) sau khi hoàn tất.
-        -> Tận dụng thời gian tính AI làm độ trễ tự nhiên để khách quay đầu.
-        """
         if not customer_name or not customer_name.strip():
             print("[REGISTER] Lỗi: Tên khách hàng không hợp lệ.")
             return False
@@ -442,52 +498,52 @@ class FaceRecognitionSystemWebcam:
         customer_name = customer_name.strip()
         print(f"--- BẮT ĐẦU ĐĂNG KÝ (REAL-TIME AI) CHO '{customer_name}' ---")
         
-        # Buffer chứa bộ đôi: (ảnh_đã_crop, vector_đặc_trưng)
         captured_data_buffer = [] 
-        
         if progress_callback:
             progress_callback(0, num_images_to_capture, "Chuẩn bị...")
 
-        # --- GIAI ĐOẠN 1: CHỤP & TÍNH TOÁN (Vừa chụp vừa tính) ---
         while len(captured_data_buffer) < num_images_to_capture:
-            # 1. Kiểm tra hủy
             if stop_flag_check and stop_flag_check():
                 self.clear_image_queue()
                 return False
 
-            # 2. Lấy ảnh
             bgr_frame = self._get_image_from_camera(timeout=1.0)
             if bgr_frame is None: continue
 
-            # 3. Detect & Crop (Bước này nhanh)
-            rgb_face_112, _ = self.find_and_prep_face(bgr_frame)
+            # 1. FACE DETECTION
+            detected_faces = self.detector.detect(bgr_frame)
+            if not detected_faces: continue
             
-            if rgb_face_112 is not None:
-                # 4. TÍNH AI NGAY LẬP TỨC (Bước này tốn ~100-200ms)
-                # Chính bước này tạo ra độ trễ tự nhiên giúp khách kịp quay đầu
+            bbox, keypoints = detected_faces[0]
+
+            # 2. ANTI-SPOOFING (BẮT BUỘC KHÔNG CHO ĐĂNG KÝ BẰNG ẢNH GIẢ)
+            is_real, _ = self.liveness.check_liveness(bgr_frame, bbox)
+            if not is_real:
+                if progress_callback:
+                    progress_callback(len(captured_data_buffer), num_images_to_capture, "⚠️ Vui lòng dùng khuôn mặt thật!", error=True)
+                continue
+
+            # 3. ALIGNMENT
+            aligned_face_bgr = align_face_112(bgr_frame, keypoints)
+            if aligned_face_bgr is not None:
+                rgb_face_112 = cv2.cvtColor(aligned_face_bgr, cv2.COLOR_BGR2RGB)
+                
+                # 4. EMBEDDING
                 embedding = self.recognizer.get_embedding(rgb_face_112)
                 
                 if embedding is not None:
-                    # Chỉ lưu vào RAM, CHƯA ghi ổ cứng
                     captured_data_buffer.append({
                         "image": rgb_face_112,
                         "embedding": embedding[0]
                     })
                     
                     count = len(captured_data_buffer)
-                    
-                    # Gửi callback "CAPTURING" để UI hiện hướng dẫn (Quay trái/phải...)
                     if progress_callback:
                         progress_callback(count, num_images_to_capture, "CAPTURING")
-                        
-                    if count % 10 == 0:
-                        print(f"[REGISTER] Đã xử lý: {count}/{num_images_to_capture}")
-            
-            # Không cần time.sleep() vì hàm get_embedding đã tốn thời gian rồi
 
         print(f"[REGISTER] Đã thu thập đủ {len(captured_data_buffer)} ảnh và vector. Đang lưu đĩa...")
 
-        # --- GIAI ĐOẠN 2: LƯU TRỮ (Chỉ tốn I/O disk, rất nhanh) ---
+        # --- (Phần lưu đĩa và lưu FAISS phía sau giữ nguyên như cũ) ---
         if progress_callback:
             progress_callback(num_images_to_capture, num_images_to_capture, "Đang lưu dữ liệu...")
 
@@ -495,39 +551,25 @@ class FaceRecognitionSystemWebcam:
         os.makedirs(person_dir, exist_ok=True)
 
         all_embeddings = []
-        
-        # Duyệt qua buffer để lưu ra file
         for idx, data in enumerate(captured_data_buffer):
             if stop_flag_check and stop_flag_check(): return False
-
             face_img = data["image"]
             emb_vec = data["embedding"]
-            
             all_embeddings.append(emb_vec)
             
-            # Lưu ảnh JPG (để làm dataset train sau này)
             save_path = os.path.join(person_dir, f"{idx:03d}.jpg")
-            # Chuyển RGB -> BGR khi lưu bằng OpenCV
             cv2.imwrite(save_path, cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR))
         
-        # --- GIAI ĐOẠN 3: TẠO VECTOR TRUNG BÌNH & KẾT THÚC ---
         success = False
         if all_embeddings:
             embeddings_np = np.array(all_embeddings).astype(np.float32)
-            
-            # Tính trung bình cộng
             avg_embedding = np.mean(embeddings_np, axis=0, keepdims=True)
             faiss.normalize_L2(avg_embedding)
             
-            # Thêm vào database nhận diện
             self.searcher.add_embedding(avg_embedding, customer_name)
-            
-            # Lưu ảnh đại diện (lấy ảnh cuối)
             last_img = captured_data_buffer[-1]["image"]
             cv2.imwrite(os.path.join(person_dir, "000_avg_ref.jpg"), cv2.cvtColor(last_img, cv2.COLOR_RGB2BGR))
-            
             success = True
-            print(f"[REGISTER] Hoàn tất đăng ký {customer_name} với {len(all_embeddings)} ảnh.")
         else:
              if progress_callback:
                 progress_callback(0, num_images_to_capture, "Lỗi: Không có dữ liệu AI", error=True)
@@ -551,12 +593,14 @@ class FaceRecognitionSystemWebcam:
             progress_callback(0, num_images_to_capture, "Bắt đầu nhận diện...")
         
         votes = []
+        liveness_failures = 0 # Đếm số lần phát hiện mặt giả
         
         for i in range(num_images_to_capture):
             if stop_flag_check and stop_flag_check():
                 print("[LOGIN] Người dùng hủy bỏ.")
                 self.clear_image_queue()
                 return "Unknown" # Trả về "Unknown" nếu bị hủy
+                
             msg = f"Đang lấy ảnh {i + 1}/{num_images_to_capture}..."
             print(f"[LOGIN] {msg}")
             if progress_callback:
@@ -565,11 +609,41 @@ class FaceRecognitionSystemWebcam:
             bgr_frame = self._get_image_from_camera()
             if bgr_frame is None: continue
 
-            rgb_face_112, _ = self.find_and_prep_face(bgr_frame)
+            # -------------------------------------------------------------
+            # BƯỚC 1: FACE DETECTION
+            # -------------------------------------------------------------
+            detected_faces = self.detector.detect(bgr_frame)
+            if not detected_faces:
+                continue # Không thấy mặt thì lấy frame tiếp theo
+                
+            bbox, keypoints = detected_faces[0]
+
+            # -------------------------------------------------------------
+            # BƯỚC 2: ANTI-SPOOFING (LIVENESS CHECK)
+            # Chỉ kiểm tra khung viền khuôn mặt (Crop) từ ảnh gốc
+            # -------------------------------------------------------------
+            is_real, liveness_score = self.liveness.check_liveness(bgr_frame, bbox)
             
-            if rgb_face_112 is not None:
+            if not is_real:
+                print(f"[LOGIN] Phát hiện MẶT GIẢ (Spoofing) - Score: {liveness_score:.4f}")
+                liveness_failures += 1
+                if progress_callback:
+                    progress_callback(i, num_images_to_capture, "CẢNH BÁO: Cố gắng giả mạo!")
+                continue # BỎ QUA NGAY FRAME NÀY, không thực hiện AI nhận diện tốn CPU
+
+            # -------------------------------------------------------------
+            # BƯỚC 3 & 4: ALIGNMENT VÀ RECOGNITION (TRÍCH XUẤT ĐẶC TRƯNG)
+            # Chỉ chạy khi chắc chắn đây là MẶT THẬT
+            # -------------------------------------------------------------
+            aligned_face_bgr = align_face_112(bgr_frame, keypoints)
+            
+            if aligned_face_bgr is not None:
+                rgb_face_112 = cv2.cvtColor(aligned_face_bgr, cv2.COLOR_BGR2RGB)
                 embedding = self.recognizer.get_embedding(rgb_face_112)
                 
+                # -------------------------------------------------------------
+                # BƯỚC 5: SO SÁNH EMBEDDED VECTOR (FAISS)
+                # -------------------------------------------------------------
                 if embedding is not None:
                     results = self.searcher.search(embedding, topk=1)
                     
@@ -586,13 +660,24 @@ class FaceRecognitionSystemWebcam:
         if progress_callback:
             progress_callback(num_images_to_capture, num_images_to_capture, "Đang xử lý kết quả...")
 
+        # -------------------------------------------------------------
+        # ĐÁNH GIÁ KẾT QUẢ TỔNG THỂ
+        # -------------------------------------------------------------
+        # 1. Nếu số lượng ảnh cố tình giả mạo vượt quá 40% số lần quét -> Báo động
+        if liveness_failures > (num_images_to_capture * 0.4):
+            print(f"[LOGIN] TỪ CHỐI ĐĂNG NHẬP: Phát hiện tấn công giả mạo {liveness_failures}/{num_images_to_capture} frames.")
+            self.clear_image_queue()
+            return "Spoofing_Detected"
+
+        # 2. Xử lý logic bầu chọn (Voting) cho mặt thật
         result = "Unknown"
         if votes:
             most_common_vote = Counter(votes).most_common(1)[0]
             name = most_common_vote[0]
             count = most_common_vote[1]
             
-            if name != "Unknown" and count > (num_images_to_capture // 4):
+            # Tính % so với số votes mặt thật hợp lệ, thay vì tổng frame
+            if name != "Unknown" and count > (len(votes) // 4):
                 result = name
         
         print(f"[LOGIN] Kết quả cuối cùng: {result}")

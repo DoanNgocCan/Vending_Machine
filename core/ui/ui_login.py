@@ -144,10 +144,11 @@ class LoginScreen(tk.Toplevel):
     def _login_successful_callback(self, customer_data):
         self.message_label.configure(text=f"Đăng nhập thành công! Chào {customer_data['name']}.", text_color="green")
         self.controller.handle_login_success(customer_data)
+        self.controller._cleanup_keyboard() # <--- THÊM DÒNG NÀY ĐỂ TẮT BÀN PHÍM
         self.after(1500, self.destroy)
 
     def _handle_face_login(self):
-        self.controller._hide_keyboard()
+        self.controller._cleanup_keyboard() # <--- SỬA THÀNH _cleanup_keyboard()
         self.withdraw()
         self.controller.show_loading_screen()
         self.destroy()
@@ -160,6 +161,7 @@ class LoginScreen(tk.Toplevel):
             messagebox.showinfo("Demo", f"Chức năng quên mật khẩu cho: {input_data} (chưa được triển khai)")
 
     def _cancel_login(self):
-        self.controller._hide_keyboard()
+        self.focus_set()
+        self.controller._cleanup_keyboard() 
         self.controller.root.deiconify() 
         self.destroy()

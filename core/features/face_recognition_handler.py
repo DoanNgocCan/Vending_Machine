@@ -18,10 +18,18 @@ except Exception:
     faiss = None
 
 try:
-    from core.Camera_AI.model import ModelEmbedding, MediaPipeFaceDetector
-except Exception:
+    from core.Camera_AI.face_recognition_library import (
+        ModelEmbedding, 
+        MediaPipeFaceDetector, 
+        LivenessDetector, 
+        align_face_112
+    )
+except Exception as e:
+    print(f"[FR_HANDLER] Lỗi import thư viện AI: {e}")
     ModelEmbedding = None
     MediaPipeFaceDetector = None
+    LivenessDetector = None
+    align_face_112 = None
 
 # Đường dẫn thống nhất
 CACHE_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'Camera_AI', 'database', 'face_cache_edgeface_base.pkl'))
@@ -47,14 +55,17 @@ class FaceRecognitionHandler:
         # Chuẩn bị model + detector
         self._detector = None
         self._embedder = None
-        if ModelEmbedding and MediaPipeFaceDetector:
+        self._liveness = None
+
+        if ModelEmbedding and MediaPipeFaceDetector and LivenessDetector:
             try:
                 self._detector = MediaPipeFaceDetector()
                 self._embedder = ModelEmbedding()
+                self._liveness = LivenessDetector() 
             except Exception as e:
-                print(f"[FR] Lỗi khởi tạo model/detector: {e}")
+                print(f"[FR] Lỗi khởi tạo model: {e}")
         else:
-            print("[FR] Cảnh báo: Thiếu ModelEmbedding hoặc MediaPipeFaceDetector.")
+            print("[FR] Cảnh báo: Thiếu ModelEmbedding hoặc MediaPipeFaceDetector hoặc LivenessDetector.")
 
     def _reset_cache_attributes(self):
         """Helper để reset tất cả các thuộc tính liên quan đến cache."""
@@ -179,16 +190,25 @@ class FaceRecognitionHandler:
                 faces = self._detector.detect(frame)
                 if not faces: continue
                 
-                x1, y1, x2, y2 = faces[0]
-                face_img = frame[y1:y2, x1:x2]
-                if face_img.size == 0: continue
+                bbox, keypoints = faces[0]
+
+                # 1. Check Liveness
+                is_real, _ = self._liveness.check_liveness(frame, bbox)
+                if not is_real: continue # Bỏ qua ảnh giả
+
+                # 2. Căn chỉnh khuôn mặt 112x112
+                aligned_bgr = align_face_112(frame, keypoints)
+                if aligned_bgr is None: continue
+                
+                # 3. Đưa vào nhúng đặc trưng (đừng quên đổi màu sang RGB)
+                rgb_face = cv2.cvtColor(aligned_bgr, cv2.COLOR_BGR2RGB)
 
                 if len(collected_embs) >= MAX_EMBS and not self._full_time:
                     break 
                 
                 if len(collected_embs) < MAX_EMBS:
                     try:
-                        emb = self._embedder.get_embedding(face_img)
+                        emb = self._embedder.get_embedding(rgb_face) # <-- Đưa ảnh RGB 112x112 vào
                         if isinstance(emb, np.ndarray) and emb.size > 0:
                             collected_embs.append(emb[0] if emb.ndim == 2 else emb)
                     except Exception:
