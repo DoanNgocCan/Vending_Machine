@@ -160,12 +160,12 @@ class RegisterScreen(tk.Toplevel):
         
         # Cập nhật lời gọi API sang màn hình chụp ảnh, truyền email thay vì dob
         self.controller.show_face_capture_screen(
-            local_user_id=local_user_id,
-            name=name,
-            phone=phone,
-            email=email,
-            password=password,
-            original_register_window=self
+            local_user_id,
+            name,
+            phone,
+            email,
+            password,
+            self
         )
 
     def _cancel_and_hide_keyboard(self):

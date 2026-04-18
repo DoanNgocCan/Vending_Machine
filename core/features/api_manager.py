@@ -5,11 +5,6 @@ import os
 from datetime import datetime
 from config import DEVICE_ID, SERVER_URL
 
-# --- CẤU HÌNH ---
-SERVER_URL = os.getenv("VENDING_SERVER_URL", "http://localhost:8000").rstrip("/")
-# QUAN TRỌNG: Đây là tên định danh của máy này. Mỗi máy phải có ID khác nhau.
-DEVICE_ID = os.getenv("VENDING_DEVICE_ID", "VENDING_MACHINE_01")
-
 API_HEADERS = {
     'Content-Type': 'application/json',
     'X-Device-ID': DEVICE_ID  # Lấy trực tiếp từ config
