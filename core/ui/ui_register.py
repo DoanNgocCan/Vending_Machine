@@ -104,6 +104,7 @@ class RegisterScreen(tk.Toplevel):
             self.show_hide_button.configure(text="Hiện")
 
     def _save_registration(self):
+        self.focus_set()
         self.controller._hide_keyboard() 
         name = self.name_entry.get().strip()
         phone = self.phone_entry.get().strip()
@@ -169,6 +170,7 @@ class RegisterScreen(tk.Toplevel):
         )
 
     def _cancel_and_hide_keyboard(self):
+        self.focus_set()
         self.controller._hide_keyboard()
         self.controller.root.deiconify() 
         self.destroy()

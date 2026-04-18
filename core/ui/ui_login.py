@@ -92,6 +92,7 @@ class LoginScreen(tk.Toplevel):
             self.show_hide_button.configure(text="Hiện")
 
     def _handle_login(self):
+        self.focus_set()
         self.controller._hide_keyboard()
         login_id = self.login_id_entry.get().strip()
         password = self.password_entry.get().strip()
@@ -160,6 +161,7 @@ class LoginScreen(tk.Toplevel):
             messagebox.showinfo("Demo", f"Chức năng quên mật khẩu cho: {input_data} (chưa được triển khai)")
 
     def _cancel_login(self):
+        self.focus_set()
         self.controller._hide_keyboard()
         self.controller.root.deiconify() 
         self.destroy()
