@@ -104,6 +104,7 @@ class RegisterScreen(tk.Toplevel):
             self.show_hide_button.configure(text="Hiện")
 
     def _save_registration(self):
+        self.focus_set()
         self.controller._hide_keyboard() 
         name = self.name_entry.get().strip()
         phone = self.phone_entry.get().strip()
@@ -155,7 +156,7 @@ class RegisterScreen(tk.Toplevel):
 
         local_user_id = result['code']
         print(f"[REGISTER_UI] Đăng ký DB local thành công, local_id: {local_user_id}. Chuyển sang chụp ảnh.")
-        self.controller._cleanup_keyboard()
+
         self.withdraw()
         
         # Cập nhật lời gọi API sang màn hình chụp ảnh, truyền email thay vì dob
@@ -170,6 +171,6 @@ class RegisterScreen(tk.Toplevel):
 
     def _cancel_and_hide_keyboard(self):
         self.focus_set()
-        self.controller._cleanup_keyboard()
+        self.controller._hide_keyboard()
         self.controller.root.deiconify() 
         self.destroy()

@@ -92,6 +92,7 @@ class LoginScreen(tk.Toplevel):
             self.show_hide_button.configure(text="Hiện")
 
     def _handle_login(self):
+        self.focus_set()
         self.controller._hide_keyboard()
         login_id = self.login_id_entry.get().strip()
         password = self.password_entry.get().strip()
@@ -144,11 +145,10 @@ class LoginScreen(tk.Toplevel):
     def _login_successful_callback(self, customer_data):
         self.message_label.configure(text=f"Đăng nhập thành công! Chào {customer_data['name']}.", text_color="green")
         self.controller.handle_login_success(customer_data)
-        self.controller._cleanup_keyboard() # <--- THÊM DÒNG NÀY ĐỂ TẮT BÀN PHÍM
         self.after(1500, self.destroy)
 
     def _handle_face_login(self):
-        self.controller._cleanup_keyboard() # <--- SỬA THÀNH _cleanup_keyboard()
+        self.controller._hide_keyboard()
         self.withdraw()
         self.controller.show_loading_screen()
         self.destroy()
@@ -162,6 +162,6 @@ class LoginScreen(tk.Toplevel):
 
     def _cancel_login(self):
         self.focus_set()
-        self.controller._cleanup_keyboard() 
+        self.controller._hide_keyboard()
         self.controller.root.deiconify() 
         self.destroy()

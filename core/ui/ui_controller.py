@@ -356,7 +356,18 @@ class AdvancedUIManager:
             print(f"Lỗi khi bật lại taskbar: {e}")
 
     def _show_keyboard(self):
+        # 1. Hủy ngay lệnh ẨN nếu nó đang trong thời gian chờ (Debounce)
+        if self.hide_keyboard_timer:
+            self.root.after_cancel(self.hide_keyboard_timer)
+            self.hide_keyboard_timer = None
+
+        # 2. Nếu bàn phím ĐÃ HIỆN rồi thì return luôn, không spam D-Bus
+        if self.keyboard_visible_state:
+            return 
+
         print("Yêu cầu HIỆN bàn phím...")
+        self.keyboard_visible_state = True # Cập nhật trạng thái
+        
         if not self.keyboard_launched:
             print("Lần đầu gọi: Đang khởi động tiến trình 'onboard'...")
             try:
@@ -381,39 +392,44 @@ class AdvancedUIManager:
                 print("Cảnh báo: Hết thời gian chờ, D-Bus của 'onboard' không phản hồi.")
                 return
         try:
-            print("Gửi lệnh 'Show' qua D-Bus...")
-            subprocess.run(
+            # DÙNG Popen THAY VÌ run ĐỂ KHÔNG CHẶN GIAO DIỆN CHÍNH
+            subprocess.Popen(
                 ['dbus-send', '--type=method_call', '--dest=org.onboard.Onboard',
-                 '/org/onboard/Onboard/Keyboard', 'org.onboard.Onboard.Keyboard.Show'],
-                check=True, capture_output=True, timeout=1
+                 '/org/onboard/Onboard/Keyboard', 'org.onboard.Onboard.Keyboard.Show']
             )
         except Exception:
             print("Cảnh báo: Không thể gửi lệnh 'Show' qua D-Bus.")
 
     def _hide_keyboard(self):
+        # DEBOUNCE: Gộp tất cả các sự kiện spam click trong 150ms thành 1 lệnh duy nhất
+        if self.hide_keyboard_timer:
+            self.root.after_cancel(self.hide_keyboard_timer)
+        self.hide_keyboard_timer = self.root.after(150, self._execute_hide_keyboard)
+    
+    def _execute_hide_keyboard(self):
+        self.hide_keyboard_timer = None
+        
+        # Nếu bàn phím ĐÃ ẨN rồi thì không làm gì cả
+        if not self.keyboard_visible_state:
+            return 
+            
         print("Yêu cầu ẨN bàn phím...")
+        self.keyboard_visible_state = False # Cập nhật trạng thái
         try:
-            subprocess.run(
+            # DÙNG Popen THAY VÌ run ĐỂ KHÔNG LÀM KHỰNG APP KHI ẨN
+            subprocess.Popen(
                 ['dbus-send', '--type=method_call', '--dest=org.onboard.Onboard',
-                 '/org/onboard/Onboard/Keyboard', 'org.onboard.Onboard.Keyboard.Hide'],
-                check=True, capture_output=True, timeout=2
+                 '/org/onboard/Onboard/Keyboard', 'org.onboard.Onboard.Keyboard.Hide']
             )
         except Exception:
             print("Cảnh báo: Không thể gửi lệnh 'Hide' qua D-Bus.")
 
     def _cleanup_keyboard(self):
-        print("Dọn dẹp bàn phím: Tắt hoàn toàn tiến trình 'onboard'...")
+        print("Dọn dẹp cuối cùng: Tắt tất cả tiến trình 'onboard'...")
         try:
             subprocess.run(['pkill', 'onboard'], check=False)
         except FileNotFoundError:
             print("Cảnh báo: Lệnh 'pkill' không tìm thấy.")
-        finally:
-            # Reset lại toàn bộ cờ trạng thái để lần sau mở lại nó sẽ tự khởi động lại
-            self.keyboard_launched = False
-            self.keyboard_visible_state = False
-            if self.hide_keyboard_timer:
-                self.root.after_cancel(self.hide_keyboard_timer)
-                self.hide_keyboard_timer = None
 
     def _handle_focus_in(self, event):
         if self.hide_keyboard_timer:
