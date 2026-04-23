@@ -36,6 +36,59 @@ class AudioDriver:
         )
         thread.start()
 
+    def play_spoofing_alert_async(self):
+        """Phát cảnh báo bảo mật khi phát hiện giả mạo khuôn mặt."""
+        thread = threading.Thread(target=self._run_spoofing_alert_sequence, daemon=True)
+        thread.start()
+
+    def _run_spoofing_alert_sequence(self):
+        alert_temp_file = os.path.join(self.sound_dir, "spoofing_alert_temp.mp3")
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+
+            # Phát ding trước để thu hút sự chú ý.
+            if os.path.exists(self.ding_file):
+                pygame.mixer.music.load(self.ding_file)
+                pygame.mixer.music.play()
+                while pygame.mixer.music.get_busy():
+                    time.sleep(0.1)
+
+            # Phát cảnh báo bằng giọng nói.
+            tts_text = (
+                "Cảnh báo bảo mật. Phát hiện cố gắng giả mạo khuôn mặt. "
+                "Vui lòng thử lại bằng khuôn mặt thật."
+            )
+            try:
+                gTTS(text=tts_text, lang='vi').save(alert_temp_file)
+                pygame.mixer.music.load(alert_temp_file)
+                pygame.mixer.music.play()
+                while pygame.mixer.music.get_busy():
+                    time.sleep(0.1)
+            except Exception as e:
+                print(f"[AudioDriver] Lỗi tạo/phát TTS cảnh báo spoofing: {e}")
+                # Fallback: phát ding thêm 2 lần nếu TTS thất bại.
+                if os.path.exists(self.ding_file):
+                    for _ in range(2):
+                        pygame.mixer.music.load(self.ding_file)
+                        pygame.mixer.music.play()
+                        while pygame.mixer.music.get_busy():
+                            time.sleep(0.1)
+                        time.sleep(0.1)
+
+        except Exception as e:
+            print(f"[AudioDriver] Lỗi luồng cảnh báo spoofing: {e}")
+        finally:
+            try:
+                if os.path.exists(alert_temp_file):
+                    try:
+                        pygame.mixer.music.unload()
+                    except Exception:
+                        pass
+                    os.remove(alert_temp_file)
+            except Exception:
+                pass
+
     def _run_audio_sequence(self, customer_name):
         try:
             # --- BƯỚC 1: BẮT BUỘC CHẠY DING.MP3 TRƯỚC ---

@@ -17,7 +17,10 @@ import numpy as np
 import numbers
 import types
 
-from src.data_io import functional as F
+try:
+    from . import functional as F
+except ImportError:
+    from src.data_io import functional as F
 
 __all__ = ["Compose", "ToTensor", "ToPILImage", "Normalize", "RandomHorizontalFlip",
            "Lambda", "RandomResizedCrop", "ColorJitter", "RandomRotation"]

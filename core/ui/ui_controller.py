@@ -18,8 +18,7 @@ project_root = os.path.join(current_dir, '..', '..') # Đi lùi 2 cấp (từ /c
 sys.path.append(project_root)
 
 # --- Imports từ project ---
-import core.Camera_AI.face_recognition_library
-from core.Camera_AI.face_recognition_library import FaceRecognitionSystemWebcam
+from core.features.face_recognition_handler import FaceRecognitionHandler
 from core.features.shopping_logic import ShoppingLogic
 from core.database.local_database_manager import db_manager
 from core.drivers.audio_driver import AudioDriver
@@ -53,11 +52,9 @@ class AdvancedUIManager:
 
         # Thêm db_manager vào self để LoginScreen có thể truy cập
         self.db_manager = db_manager
-        print("UI_INIT: Khởi tạo Hệ thống AI Camera (FaceRecognitionSystemWebcam)...")
+        print("UI_INIT: Khởi tạo Hệ thống AI Camera (FaceRecognitionHandler)...")
         try:
-            # Dòng này sẽ khởi tạo model EdgeFace, MediaPipe, FAISS
-            # và tự khởi động luồng webcam (daemon)
-            self.camera_ai_system = FaceRecognitionSystemWebcam()
+            self.camera_ai_system = FaceRecognitionHandler()
             print("UI_INIT: Hệ thống AI Camera đã sẵn sàng.")
             self.stop_camera_service()
         except FileNotFoundError as e:
@@ -66,7 +63,7 @@ class AdvancedUIManager:
             self.root.destroy()
             return
         except Exception as e:
-            print(f"LỖI NGHIÊM TRỌNG: Không thể khởi tạo FaceRecognitionSystemWebcam: {e}")
+            print(f"LỖI NGHIÊM TRỌNG: Không thể khởi tạo FaceRecognitionHandler: {e}")
             import traceback
             traceback.print_exc()
             messagebox.showerror("Lỗi AI", f"Không thể tải model AI: {e}\nỨng dụng sẽ thoát.")
@@ -234,6 +231,19 @@ class AdvancedUIManager:
         if not self.root.winfo_exists(): return
 
         print(f"UI-MAIN: Nhận diện xong, output user_id: {recognized_user_id}")
+
+        if recognized_user_id == "Spoofing_Detected":
+            print("UI-MAIN: CẢNH BÁO BẢO MẬT - phát hiện cố gắng giả mạo khuôn mặt.")
+            self.root.deiconify()
+            self.status_message_var.set("⚠️ Cảnh báo: Phát hiện giả mạo khuôn mặt. Vui lòng thử lại bằng khuôn mặt thật.")
+            try:
+                self.audio_driver.play_spoofing_alert_async()
+            except Exception as e:
+                print(f"UI-MAIN: Lỗi phát âm thanh cảnh báo spoofing: {e}")
+            self.root.after(5000, lambda: self.status_message_var.set("Chọn sản phẩm để mua hàng"))
+            self.update_welcome_message()
+            self._update_auth_frame_visibility()
+            return
         
         # recognized_user_id bây giờ là string (từ FAISS)
         # Cần đảm bảo nó khớp với 'code' trong DB
