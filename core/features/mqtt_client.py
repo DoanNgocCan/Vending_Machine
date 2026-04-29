@@ -54,6 +54,7 @@ class MQTTClientManager:
         self._ui_refresh_callback = None
         # Callback được gọi với (item_name, price, quantity) khi nhận hot update
         self._product_update_callback = None
+        self._sync_timer = None
 
     def setup(self, db_manager, api_manager,
               ui_refresh_callback=None,
@@ -201,20 +202,35 @@ class MQTTClientManager:
 
     def _handle_data_changed(self, payload):
         """Xử lý khi Server Tạo mới / Xóa sản phẩm / Đổi ảnh"""
+        
+        # 1. FIX LỖI LÂY LAN: Kiểm tra xem lệnh này dành cho máy nào
+        target_device = payload.get("device_id")
+        
+        # Nếu server có chỉ định thiết bị, mà không phải máy này -> BỎ QUA
+        if target_device and target_device != DEVICE_ID:
+            logging.info(f"MQTT: Bỏ qua data_changed vì dành cho máy khác ({target_device})")
+            return
+
         event = payload.get("event", "unknown")
-        logging.info(f"MQTT: Nhận tín hiệu '{event}'. Đang HTTP Sync toàn bộ dữ liệu...")
+        logging.info(f"MQTT: Nhận tín hiệu '{event}'. Đang chuẩn bị HTTP Sync toàn bộ dữ liệu...")
+
+        # 2. FIX LỖI NHÁY UI: Xóa bỏ luồng cũ nếu có luồng mới tới liên tục
+        if self._sync_timer is not None:
+            self._sync_timer.cancel()
 
         def pull_all_from_server():
-            import time
-            time.sleep(2) 
-            
             if self._db_manager:
                 self._db_manager.sync_products_from_server()
+                
+                # Gọi refresh UI
                 if self._ui_refresh_callback:
                     self._ui_refresh_callback()
 
-        t = threading.Thread(target=pull_all_from_server, daemon=True)
-        t.start()
+        # Đặt đồng hồ đếm ngược 2.0 giây. 
+        # Nếu trong 2 giây này có tin nhắn MQTT khác tới, đồng hồ trên sẽ bị hủy và đặt lại.
+        # Đảm bảo UI chỉ bị load ĐÚNG 1 LẦN sau khi các gói tin đã đến hết.
+        self._sync_timer = threading.Timer(2.0, pull_all_from_server)
+        self._sync_timer.start()
 
 
     # ------------------------------------------------------------------
