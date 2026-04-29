@@ -13,7 +13,6 @@ import requests
 import time
 import ast
 from core.features.api_manager import DEVICE_ID, API_HEADERS, SERVER_URL
-from werkzeug.security import generate_password_hash, check_password_hash
 
 # 1. Lấy đường dẫn thư mục hiện tại (thư mục 'database')
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -124,7 +123,6 @@ class LocalDatabaseManager:
             pass 
         user_id = f"local_{uuid.uuid4().hex[:8]}"
         created_at = datetime.now().isoformat()
-        hashed_password = generate_password_hash(password)
         
         # Đổi birthday -> email
         sql = "INSERT INTO customers (user_id, full_name, phone_number, email, password, created_at, face_encoding, is_synced) VALUES (?, ?, ?, ?, ?, ?, ?, 0)"
