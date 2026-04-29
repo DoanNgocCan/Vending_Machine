@@ -337,15 +337,36 @@ class AdvancedUIManager:
     
     def _open_browser_kiosk_mode(self, url):
         print(f"UI: Đang mở trình duyệt ở chế độ kiosk với URL: {url}")
-        try:
-            command = ['chromium-browser', '--kiosk', '--no-first-run', '--disable-infobars', '--disable-session-crashed-bubble', '--incognito', '--disable-gpu', url]
-            subprocess.Popen(command)
-        except FileNotFoundError:
-            print("LỖI: Lệnh 'chromium-browser' không tìm thấy. Sử dụng webbrowser.open() thay thế.")
-            import webbrowser
-            webbrowser.open(url)
-        except Exception as e:
-            print(f"Lỗi không xác định khi mở trình duyệt: {e}")
+        browser_candidates = [
+            '/usr/lib/chromium/chromium',
+            'chromium-browser',
+            'chromium',
+        ]
+        browser_args = [
+            '--kiosk', 
+            '--no-first-run', 
+            '--disable-infobars', 
+            '--disable-session-crashed-bubble', 
+            '--incognito', 
+            '--disable-gpu',
+            '--log-level=3',                                              # Chỉ in lỗi chí mạng, ẩn log cảnh báo
+            '--disable-background-networking',                            # Tắt kết nối ngầm với Google
+            '--disable-sync',                                             # Tắt đồng bộ hóa tài khoản
+            '--disable-features=Translate,OptimizationHints,MediaRouter', # Tắt các tính năng thừa
+            url
+        ]
+
+        for browser_cmd in browser_candidates:
+            try:
+                subprocess.Popen([browser_cmd, *browser_args])
+                return
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                print(f"Lỗi khi mở trình duyệt bằng '{browser_cmd}': {e}")
+
+        print("LỖI: Không tìm thấy Chromium phù hợp. Sử dụng webbrowser.open() thay thế.")
+        webbrowser.open(url)
 
     # --- TRONG FILE: core/ui/ui_controller.py ---
 

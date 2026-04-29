@@ -13,6 +13,7 @@ import requests
 import time
 import ast
 from core.features.api_manager import DEVICE_ID, API_HEADERS, SERVER_URL
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # 1. Lấy đường dẫn thư mục hiện tại (thư mục 'database')
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -123,18 +124,18 @@ class LocalDatabaseManager:
             pass 
         user_id = f"local_{uuid.uuid4().hex[:8]}"
         created_at = datetime.now().isoformat()
+        hashed_password = generate_password_hash(password)
         
         # Đổi birthday -> email
         sql = "INSERT INTO customers (user_id, full_name, phone_number, email, password, created_at, face_encoding, is_synced) VALUES (?, ?, ?, ?, ?, ?, ?, 0)"
         try:
             with self._get_connection() as con:
+                # Lưu biến password trực tiếp
                 con.execute(sql, (user_id, name, phone, email, password, created_at, face_encoding))
                 con.commit()
             logging.info(f"Đã đăng ký thành công cho: {name}")
             return {"code": user_id, "name": name, "phone": phone, "email": email, "points": 0}
-        except sqlite3.IntegrityError:
-            return {"error": "duplicate_phone_or_email"}
-        except sqlite3.Error as e:
+        except Exception as e:
             logging.error(f"Lỗi DB khi đăng ký khách hàng: {e}")
             return {"error": "db_error"}
 
@@ -299,13 +300,14 @@ class LocalDatabaseManager:
                     count = 0
                     for user in server_users:
                         con.execute("""
-                            INSERT INTO customers (user_id, full_name, phone_number, email, points, is_synced)
-                            VALUES (?, ?, ?, ?, ?, 1)
+                            INSERT INTO customers (user_id, full_name, phone_number, email, points, password, is_synced)
+                            VALUES (?, ?, ?, ?, ?, ?, 1)
                             ON CONFLICT(user_id) DO UPDATE SET
                                 full_name = excluded.full_name,
                                 phone_number = excluded.phone_number,
                                 email = excluded.email,
                                 points = excluded.points,
+                                password = excluded.password, -- Lưu thẳng mật khẩu text từ server
                                 is_synced = 1
                         """, (
                             user['user_id'],
@@ -313,6 +315,7 @@ class LocalDatabaseManager:
                             user.get('phone_number', ''),
                             user.get('email', ''),
                             user.get('points', 0),
+                            user.get('password', '') # Server trả về gì lưu nấy
                         ))
                         count += 1
                     con.commit()
@@ -412,9 +415,8 @@ class LocalDatabaseManager:
                         return True
         except Exception as e:
             logging.error(f"❌ Lỗi sync_products_from_server: {e}")
-            return False
-        
-    def login_customer(self, login_id, password_input): # Đổi phone -> login_id
+            return False    
+    def login_customer(self, login_id, password_input):
         sql = "SELECT * FROM customers WHERE phone_number = ? OR email = ?"
         try:
             with self._get_connection() as con:
@@ -422,7 +424,8 @@ class LocalDatabaseManager:
                 cursor.execute(sql, (login_id, login_id))
                 user_row = cursor.fetchone()
 
-                if user_row and user_row['password'] == password_input:
+                # THAY ĐỔI: So sánh trực tiếp text thuần
+                if user_row and user_row['password'] == str(password_input):
                     logging.info(f"Đăng nhập thành công cho: {login_id}")
                     return {
                         "code": user_row['user_id'],
@@ -432,6 +435,7 @@ class LocalDatabaseManager:
                         "points": user_row['points']
                     }
                 else:
+                    logging.warning(f"Đăng nhập thất bại cho: {login_id}")
                     return None
         except Exception as e:
             logging.error(f"Lỗi DB khi đăng nhập: {e}")
@@ -507,12 +511,13 @@ class LocalDatabaseManager:
             
         sql = """
             INSERT INTO customers (user_id, full_name, phone_number, email, points, is_synced, password, created_at)
-            VALUES (?, ?, ?, ?, ?, 1, 'synced_from_server', ?)
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 full_name = excluded.full_name,
                 phone_number = excluded.phone_number,
                 email = excluded.email,
                 points = excluded.points,
+                password = excluded.password,
                 is_synced = 1;
         """
         try:
@@ -523,6 +528,7 @@ class LocalDatabaseManager:
                     server_user_data.get('phone_number'),
                     server_user_data.get('email'), 
                     server_user_data.get('points', 0),
+                    server_user_data.get('password', ''), # Lấy mật khẩu do API trả về
                     datetime.now().isoformat()
                 ))
             logging.info(f"Đã thêm/cập nhật user {user_id} từ server vào CSDL local.")

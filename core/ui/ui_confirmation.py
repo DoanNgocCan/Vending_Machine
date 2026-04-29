@@ -180,27 +180,34 @@ class ConfirmationScreen(tk.Toplevel):
         self.sub_total_value_label.configure(text=f"{self.total_price:,.0f}đ")
         self.final_total_label.configure(text=f"{final_total:,.0f}đ")
         
+        self.sub_total_frame.pack_forget()
+        self.high_value_frame.pack_forget()
+        self.points_frame_sum.pack_forget()
+        self.final_separator.pack_forget()
+        self.final_total_frame.pack_forget()
+        self.earn_points_label.pack_forget()
+
+        self.sub_total_frame.pack(fill="x", pady=2)
+        
         if self.large_order_discount > 0:
             self.high_value_discount_label.configure(text=f"-{self.large_order_discount:,.0f}đ")
-            self.high_value_frame.pack(before=self.final_separator, fill="x", pady=2)
-        else:
-            self.high_value_frame.pack_forget()
+            self.high_value_frame.pack(fill="x", pady=2)
+            
+        if points_discount_value > 0:
+            self.points_discount_label.configure(text=f"-{points_discount_value:,.0f}đ")
+            self.points_frame_sum.pack(fill="x", pady=2)
+            
+        self.final_separator.pack(fill="x", pady=6)
+        self.final_total_frame.pack(fill="x", pady=2)
         
         points_earned = int(final_total // 1000) 
-        
-        # Chỉ hiển thị nếu khách có đăng nhập (tức là customer_info tồn tại)
         if self.controller.customer_info and points_earned > 0:
             self.earn_points_label.configure(text=f"🎁 Bạn sẽ tích lũy thêm {points_earned} điểm từ đơn hàng này!")
         else:
             self.earn_points_label.configure(text="")
             
-        self.update_idletasks()
+        self.earn_points_label.pack(fill="x", pady=(5, 0))
 
-        if points_discount_value > 0:
-            self.points_discount_label.configure(text=f"-{points_discount_value:,.0f}đ")
-            self.points_frame_sum.pack(before=self.final_separator, fill="x", pady=2)
-        else:
-            self.points_frame_sum.pack_forget()
         self.update_idletasks()
 
     def _process_final_payment(self):
