@@ -343,17 +343,17 @@ class AdvancedUIManager:
             'chromium',
         ]
         browser_args = [
-            '--kiosk', 
-            '--no-first-run', 
-            '--disable-infobars', 
-            '--disable-session-crashed-bubble', 
-            '--incognito', 
+            '--kiosk',
+            '--no-first-run',
+            '--disable-infobars',
+            '--disable-session-crashed-bubble',
+            '--incognito',
             '--disable-gpu',
-            '--log-level=3',                                              # Chỉ in lỗi chí mạng, ẩn log cảnh báo
-            '--disable-background-networking',                            # Tắt kết nối ngầm với Google
-            '--disable-sync',                                             # Tắt đồng bộ hóa tài khoản
-            '--disable-features=Translate,OptimizationHints,MediaRouter', # Tắt các tính năng thừa
-            url
+            '--log-level=3',
+            '--disable-background-networking',
+            '--disable-sync',
+            '--disable-features=Translate,OptimizationHints,MediaRouter',
+            url,
         ]
 
         for browser_cmd in browser_candidates:
