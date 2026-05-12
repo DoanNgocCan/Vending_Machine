@@ -4,6 +4,10 @@ from tkinter import PhotoImage
 from PIL import Image, ImageTk
 import os
 import sys
+import requests
+import threading
+import random
+from datetime import datetime
 
 # --- CẤU HÌNH ĐƯỜNG DẪN (Để import được config) ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -314,10 +318,6 @@ class MainView:
         """
         Cập nhật hiển thị của MỘT sản phẩm cụ thể mà không vẽ lại toàn bộ lưới.
         Được gọi khi nhận được MQTT hot update (Requirement 2A).
-        Args:
-            item_name: Tên sản phẩm (khớp với DB).
-            price: Giá mới (None = không thay đổi).
-            quantity: Số lượng mới (None = không thay đổi).
         """
         btn = self._product_btn_map.get(item_name)
         if btn is None:
@@ -329,7 +329,7 @@ class MainView:
             current_stock = {}
 
         product_data = {}
-        current_slot = "" # Thêm biến hứng slot
+        current_slot = "" 
         for slot, data in current_stock.items():
             if data.get('item_name') == item_name:
                 product_data = data
@@ -354,7 +354,7 @@ class MainView:
 
         display_text = f"Ô {current_slot}: {item_name}\n{status_text}"
 
-        # Cập nhật nút
+        # Cập nhật nút ngoài màn hình chính
         btn.config(state=btn_state, bg=btn_bg, activebackground=btn_bg,
                    disabledforeground=text_color)
         if btn.cget("image"):
@@ -362,8 +362,6 @@ class MainView:
         else:
             btn.config(text=f"[No Img]\n{display_text}")
 
-        # Gán lại command với giá mới
-        #static_key = static[0] if static else self._make_product_id(item_name)
         if not is_out_of_stock:
             btn.config(
                 command=lambda p=(str(current_slot), item_name, current_price), b=btn:
@@ -371,5 +369,189 @@ class MainView:
             )
         else:
             btn.config(command="")
+        # THÊM LOGIC CẬP NHẬT GIÁ CHO POPUP ĐỀ XUẤT (NẾU ĐANG MỞ)
+        if hasattr(self, 'recommendation_overlay') and self.recommendation_overlay.winfo_exists():
+            inventory = self.controller.get_latest_inventory()
+            
+            # Lấy thông tin sản phẩm đang được popup hiển thị
+            rec_product = inventory.get(self.current_recommended_slot) or inventory.get(int(self.current_recommended_slot) if self.current_recommended_slot.isdigit() else self.current_recommended_slot)
+            
+            # Nếu sản phẩm bị thay đổi MQTT trùng với sản phẩm đang hiện trên Popup
+            if rec_product and rec_product.get('item_name') == item_name:
+                new_price = price if price is not None else rec_product.get('price', 0)
+                
+                # Sửa trực tiếp Label giá và tên trên Popup
+                if hasattr(self, 'rec_price_label') and self.rec_price_label.winfo_exists():
+                    self.rec_price_label.config(text=f"{int(new_price):,} VNĐ")
+                if hasattr(self, 'rec_name_label') and self.rec_name_label.winfo_exists():
+                    self.rec_name_label.config(text=item_name)
+    # ==========================================
+    # CÁC HÀM XỬ LÝ POPUP GỢI Ý MUA HÀNG
+    # ==========================================
+    def check_and_show_recommendation(self, user_id, user_name):
+        """Chạy luồng ngầm lấy dữ liệu gợi ý từ server"""
+        def fetch_data():
+            try:
+                url = f"https://vending-machine.lavaa.qzz.io/api/users/{user_id}/recommendation"
+                response = requests.get(url, timeout=5)
+                
+                # Kiểm tra mã trạng thái HTTP trước khi phân tích JSON
+                if response.status_code == 200:
+                    try:
+                        data = response.json()
+                        if data.get('status') == 'success':
+                            product = data['data']
+                            self.root.after(0, lambda: self.show_recommendation_popup(product, user_name))
+                        else:
+                            print(f"[UI] Không có gợi ý: {data.get('message')}")
+                    except ValueError:
+                        print("[UI] Cảnh báo: Server không trả về JSON hợp lệ.")
+                else:
+                    print(f"[UI] Lỗi Server API: Mã {response.status_code}")
+                    print(f"[UI] Chi tiết lỗi: {response.text}")
+            except Exception as e:
+                print(f"[UI] Lỗi kết nối khi tải gợi ý mua hàng: {e}")
 
-        print(f"[UI] Đã cập nhật sản phẩm '{item_name}': giá={current_price}, tồn kho={stock_qty}.")
+        threading.Thread(target=fetch_data, daemon=True).start()
+
+    def show_recommendation_popup(self, product, user_name):
+        """Vẽ popup đề xuất với lời chào cá nhân hóa và ngôn ngữ tự nhiên"""
+        recommended_name = product['name']
+        recommended_price = product['price']
+        
+        # --- LOGIC CÁ NHÂN HÓA LỜI CHÀO ---
+        hour = datetime.now().hour
+        if 5 <= hour < 11:
+            time_greeting = "Chúc bạn một buổi sáng năng lượng"
+        elif 11 <= hour < 14:
+            time_greeting = "Nghỉ trưa chút thôi"
+        elif 14 <= hour < 18:
+            time_greeting = "Nạp năng lượng cho buổi chiều nhé"
+        else:
+            time_greeting = "Tối muộn rồi, nghỉ ngơi thôi"
+
+        greetings = [
+            f"{time_greeting}, {user_name}! ✨",
+            f"Rất vui được gặp lại {user_name}!",
+            f"Chào {user_name}, hôm nay của bạn thế nào?",
+            f"Lại là {user_name} đây rồi! 👋"
+        ]
+        
+        suggest_texts = [
+            f"Hệ thống thấy '{recommended_name}' là 'chân á' của bạn. Làm một lon nhé?",
+            f"Vẫn là hương vị quen thuộc '{recommended_name}' chứ?",
+            f"Đã lâu không gặp, bạn có muốn thưởng thức lại '{recommended_name}' không?",
+            f"Máy vừa mới nhập thêm '{recommended_name}' dành riêng cho bạn đây!"
+        ]
+
+        final_greeting = random.choice(greetings)
+        final_suggest = random.choice(suggest_texts)
+        
+        # 1. Tìm slot sản phẩm
+        try:
+            current_stock = self.controller.get_latest_inventory()
+        except AttributeError: current_stock = {}
+
+        target_slot = None
+        max_stock = 0
+        for slot, data in current_stock.items():
+            if data.get('item_name') == recommended_name and data.get('qty', 0) > 0:
+                target_slot = slot
+                max_stock = data.get('qty', 0)
+                recommended_price = data.get('price', recommended_price)
+                break
+        
+        if not target_slot: return
+
+        # [QUAN TRỌNG]: Lưu lại slot đang được đề xuất để hàm cập nhật giá có thể tìm thấy
+        self.current_recommended_slot = str(target_slot)
+
+        # 2. VẼ GIAO DIỆN
+        popup_w, popup_h = 680, 580
+        self.recommendation_overlay = ctk.CTkFrame(
+            self.root, width=popup_w, height=popup_h,
+            fg_color="#014b91", corner_radius=25, border_width=3, border_color="#FFD700"
+        )
+        self.recommendation_overlay.place(relx=0.5, rely=0.5, anchor="center")
+        self.recommendation_overlay.pack_propagate(False)
+
+        tk.Label(self.recommendation_overlay, text=final_greeting, 
+                 font=("Arial", 24, "bold"), bg="#014b91", fg="white").pack(pady=(30, 5))
+        
+        tk.Label(self.recommendation_overlay, text=final_suggest, 
+                 font=("Arial", 14, "italic"), bg="#014b91", fg="#e0e0e0", wraplength=600).pack(pady=(0, 15))
+
+        # 3. HIỂN THỊ ẢNH
+        product_id = str(target_slot)
+        cached_data = self.controller.cached_product_images.get(product_id)
+        if cached_data:
+            img_label = tk.Label(self.recommendation_overlay, image=cached_data["image"], bg="#014b91")
+            img_label.image = cached_data["image"]
+            img_label.pack(pady=5)
+
+        # 4. TÊN & GIÁ (Lưu vào thuộc tính self để lát nữa dễ cập nhật)
+        self.rec_name_label = tk.Label(self.recommendation_overlay, text=f"{recommended_name}", 
+                 font=("Arial", 28, "bold"), bg="#014b91", fg="#FFD700")
+        self.rec_name_label.pack()
+        
+        self.rec_price_label = tk.Label(self.recommendation_overlay, text=f"{int(recommended_price):,} VNĐ", 
+                 font=("Arial", 20), bg="#014b91", fg="white")
+        self.rec_price_label.pack(pady=(5, 15))
+
+        # 5. SỐ LƯỢNG & NÚT BẤM
+        self.popup_qty = tk.IntVar(value=1)
+        qty_frame = tk.Frame(self.recommendation_overlay, bg="#014b91")
+        qty_frame.pack(pady=5)
+        
+        tk.Button(qty_frame, text="-", font=("Arial", 18, "bold"), width=3, bg="#e0e0e0",
+                  command=lambda: self.popup_qty.set(max(1, self.popup_qty.get() - 1))).pack(side="left", padx=15)
+        
+        tk.Label(qty_frame, textvariable=self.popup_qty, font=("Arial", 22, "bold"), 
+                 width=4, bg="white", relief="sunken").pack(side="left", padx=10)
+        
+        tk.Button(qty_frame, text="+", font=("Arial", 18, "bold"), width=3, bg="#e0e0e0",
+                  command=lambda: self.popup_qty.set(min(max_stock, self.popup_qty.get() + 1))).pack(side="left", padx=15)
+
+        btn_frame = tk.Frame(self.recommendation_overlay, bg="#014b91")
+        btn_frame.pack(pady=25)
+        
+        # [QUAN TRỌNG]: Đã xóa recommended_price ra khỏi lambda
+        ctk.CTkButton(btn_frame, text="MUA LUÔN 🛒", font=("Arial", 18, "bold"), fg_color="#4CAF50", 
+                      width=220, height=55, corner_radius=15,
+                      command=lambda: self.accept_recommendation(target_slot, recommended_name, self.popup_qty.get())).pack(side="left", padx=20)
+        
+        ctk.CTkButton(btn_frame, text="ĐỂ SAU NHÉ", font=("Arial", 18, "bold"), fg_color="#555555", 
+                      width=200, height=55, corner_radius=15,
+                      command=self.close_recommendation_popup).pack(side="right", padx=20)
+    def close_recommendation_popup(self):
+        """Đóng thông báo và cho phép người dùng chọn món bình thường"""
+        if hasattr(self, 'recommendation_overlay'):
+            self.recommendation_overlay.destroy()
+
+    def accept_recommendation(self, slot, name, qty):
+        """Khách bấm CÓ -> Tự tra cứu giá mới nhất và đưa vào giỏ hàng"""
+        self.close_recommendation_popup()
+        
+        # LẤY GIÁ MỚI NHẤT TỪ KHO CỤC BỘ (Source of Truth)
+        inventory = self.controller.get_latest_inventory()
+        # slot có thể là string hoặc int tùy theo cách lưu trong dict
+        product_data = inventory.get(slot) or inventory.get(int(slot))
+        
+        if not product_data:
+            print(f"[UI] Lỗi: Không tìm thấy sản phẩm tại ô {slot} để cập nhật giá.")
+            return
+
+        latest_price = product_data.get('price', 0)
+        latest_name = product_data.get('item_name', name)
+        
+        # 1. Giả lập chọn sản phẩm với GIÁ ĐÃ CẬP NHẬT
+        product_tuple = (str(slot), latest_name, latest_price)
+        self.controller.on_product_select(product_tuple, None)
+        
+        # 2. Đồng bộ số lượng từ Popup
+        self.controller.selected_quantity = qty
+        self.controller.quantity_var.set(str(qty))
+        
+        # 3. Kích hoạt lệnh thêm vào giỏ
+        self.controller.on_confirm_add()
+        print(f"[UI] Đã thêm {qty} {latest_name} vào giỏ với giá mới nhất: {latest_price:,}đ")

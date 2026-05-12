@@ -222,6 +222,11 @@ class AdvancedUIManager:
         self._update_auth_frame_visibility()
         
         self.root.deiconify()
+        if hasattr(self, 'main_view') and 'code' in customer_data:
+            # Dùng ID (code) từ DB local để gọi lên Server check gợi ý
+            user_id = customer_data['code'] 
+            # Gọi hàm ở bên ui_main.py
+            self.main_view.check_and_show_recommendation(user_id, self.customer_name)
 
     def _on_recognition_finished(self, recognized_user_id):
         """
