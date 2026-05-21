@@ -45,7 +45,7 @@ class LocalDatabaseManager:
                         user_id TEXT PRIMARY KEY,
                         full_name TEXT NOT NULL,
                         phone_number TEXT UNIQUE NOT NULL,
-                        email TEXT UNIQUE,     -- Thêm email, xóa birthday
+                        email TEXT UNIQUE,  
                         password TEXT,
                         points INTEGER DEFAULT 0,
                         face_encoding BLOB,
@@ -83,6 +83,16 @@ class LocalDatabaseManager:
                         if "duplicate column name" not in str(e).lower():
                             raise
                 
+                for col_def in [
+                    ("offline_images_zip", "BLOB"), # Lưu file ZIP khi rớt mạng
+                    ("face_vector", "BLOB")         # Lưu Vector Trung Bình
+                ]:
+                    try:
+                        cursor.execute(f"ALTER TABLE customers ADD COLUMN {col_def[0]} {col_def[1]}")
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column name" not in str(e).lower():
+                            raise                          
+
                 # Bảng transaction_history
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS transaction_history (
@@ -606,6 +616,7 @@ class LocalDatabaseManager:
             logging.error(f"Lỗi khi đánh dấu đồng bộ đơn hàng {order_code}: {e}")
             return False
 
+    '''
     def get_unsynced_customers(self):
         try:
             with self._get_connection() as con:
@@ -614,6 +625,7 @@ class LocalDatabaseManager:
         except sqlite3.Error as e:
             logging.error(f"Lỗi khi lấy danh sách khách hàng chưa đồng bộ: {e}")
             return []
+    '''
 
     def update_customer_points(self, user_id, points_used, total_amount):
         if not user_id: return False
@@ -676,5 +688,81 @@ class LocalDatabaseManager:
         except sqlite3.Error as e:
             logging.error(f"Lỗi khi đánh dấu unsynced cho user {user_id}: {e}")
             return False
+    def save_customer_with_face_data(self, user_id, name, phone, email, password, points, face_vector, images_zip=None):
+        """
+        Lưu khách mới hoặc cập nhật khách cũ cùng vector, ảnh ZIP, password và points vào DB.
+        """
+        created_at = datetime.now().isoformat()
+        try:
+            with self._get_connection() as con:
+                sql = """
+                    INSERT INTO customers 
+                    (user_id, full_name, phone_number, email, password, points, face_vector, offline_images_zip, is_synced, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        full_name = excluded.full_name,
+                        phone_number = excluded.phone_number,
+                        email = excluded.email,
+                        password = excluded.password,
+                        points = excluded.points,
+                        face_vector = excluded.face_vector,
+                        offline_images_zip = COALESCE(excluded.offline_images_zip, customers.offline_images_zip),
+                        is_synced = 0
+                """
+                con.execute(sql, (user_id, name, phone, email, password, points, face_vector, images_zip, created_at))
+                con.commit()
+            logging.info(f"Đã lưu thành công face data, password và points ({points}) cho khách hàng: {name}")
+            return True
+        except sqlite3.Error as e:
+            logging.error(f"Lỗi khi lưu dữ liệu khách hàng toàn diện cho {name}: {e}")
+            return False
 
+    def get_synced_customers(self):
+        """Trả về danh sách khách có is_synced = 1"""
+        try:
+            with self._get_connection() as con:
+                return con.execute("SELECT * FROM customers WHERE is_synced = 1").fetchall()
+        except sqlite3.Error as e:
+            logging.error(f"Lỗi khi lấy danh sách khách hàng đã đồng bộ: {e}")
+            return []
+    def get_unsynced_customers(self):
+        """
+        Trả về danh sách khách có is_synced = 0.
+        Theo thiết kế, ưu tiên lọc những người bị mắc kẹt file ZIP.
+        """
+        try:
+            with self._get_connection() as con:
+                # Ghi chú: Nếu hệ thống có cả đăng ký bằng Password, bạn có thể cân nhắc bỏ điều kiện 'AND offline_images_zip IS NOT NULL'
+                customers = con.execute(
+                    "SELECT * FROM customers WHERE is_synced = 0 AND offline_images_zip IS NOT NULL"
+                ).fetchall()
+                return customers
+        except sqlite3.Error as e:
+            logging.error(f"Lỗi khi lấy danh sách khách hàng chưa đồng bộ: {e}")
+            return []
+
+    def update_sync_status(self, user_id, is_synced):
+        """Cập nhật cờ is_synced"""
+        try:
+            with self._get_connection() as con:
+                con.execute("UPDATE customers SET is_synced = ? WHERE user_id = ?", (is_synced, user_id))
+                con.commit()
+            logging.info(f"Đã cập nhật trạng thái is_synced={is_synced} cho user {user_id}.")
+            return True
+        except sqlite3.Error as e:
+            logging.error(f"Lỗi cập nhật sync status cho user {user_id}: {e}")
+            return False
+
+    def clear_offline_images_zip(self, user_id):
+        """Xóa file ZIP khỏi DB để giải phóng dung lượng thẻ SD và RAM"""
+        try:
+            with self._get_connection() as con:
+                con.execute("UPDATE customers SET offline_images_zip = NULL WHERE user_id = ?", (user_id,))
+                con.commit()
+            logging.info(f"Đã dọn dẹp file offline_images_zip (BLOB) cho user {user_id}.")
+            return True
+        except sqlite3.Error as e:
+            logging.error(f"Lỗi khi clear offline images cho user {user_id}: {e}")
+            return False
+        
 db_manager = LocalDatabaseManager()

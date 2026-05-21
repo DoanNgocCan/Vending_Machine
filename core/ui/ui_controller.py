@@ -267,41 +267,6 @@ class AdvancedUIManager:
         self.root.deiconify()
         self.update_welcome_message()
         self._update_auth_frame_visibility()
-
-
-    def _background_registration_and_embedding(self, name, phone, email, password, register_window, local_user_id):
-        """
-        (CHẠY TRÊN LUỒNG NỀN)
-        Hàm này được gọi bởi AIFaceRegistrationScreen SAU KHI chụp ảnh.
-        Nó chỉ còn nhiệm vụ đồng bộ lên server.
-        """
-        registration_data = None
-        error_message = None
-
-        try:
-            print(f"[REGISTER_BG] Bước 3 (sau khi chụp ảnh): Bắt đầu đồng bộ user {name} (ID: {local_user_id}) lên server...")
-            
-            # Lấy lại thông tin user vừa đăng ký
-            registration_data = db_manager.get_customer_by_id(local_user_id)
-            if not registration_data:
-                raise Exception(f"Không tìm thấy user {local_user_id} trong DB local sau khi đăng ký.")
-                
-            sync_thread = threading.Thread(
-                target=db_manager.sync_customer_to_server,
-                args=(name, phone, email, password, local_user_id),
-                daemon=True
-            )
-            sync_thread.start()
-            
-            print("[REGISTER_BG] Luồng nền (đồng bộ) hoàn tất thành công.")
-
-        except Exception as e:
-            error_message = str(e)
-            print(f"[REGISTER_BG] LỖI trong luồng nền đồng bộ: {error_message}")
-        finally:
-            # Không cần xóa captured_images_dir nữa vì thư viện AI tự xử lý
-            pass
-        pass
     
     def get_latest_inventory(self):
         """Hàm bridge để UI gọi lấy tồn kho từ DB"""

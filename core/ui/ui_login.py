@@ -124,7 +124,7 @@ class LoginScreen(tk.Toplevel):
                 "name": server_user_data.get('full_name'),
                 "phone": server_user_data.get('phone_number'),
                 "email": server_user_data.get('email'),
-                "points": server_user_data.get('points')
+                "points": server_user_data.get('points', 0)
             }
             self._login_successful_callback(client_user_data)
         else:

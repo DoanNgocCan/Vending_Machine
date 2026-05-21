@@ -132,46 +132,56 @@ class AIFaceRegistrationScreen(tk.Toplevel):
     # === LUỒNG WORKER (XỬ LÝ) ===
     def _registration_task(self):
         """(CHẠY TRÊN LUỒNG NỀN)"""
-        success = False
+        reg_data = None # Đổi tên biến success thành reg_data để chứa output dictionary
         try:
             time.sleep(1.0)
             
-            # === LOGIC CỐT LÕI ===
-            # Gọi thẳng hàm register của thư viện
-            success = self.ai_system.register_customer(
-                customer_name=str(self.local_user_id), # Dùng ID làm tên
-                num_images_to_capture=self.num_images_target,
+            # Gọi thẳng hàm register của thư viện AI (sẽ trả về Dict chứa vector và zip)
+            reg_data = self.ai_system.register_customer(
+                customer_name=str(self.local_user_id), 
+                num_frames_to_capture=self.num_images_target, # Đã update param theo luồng mới
                 progress_callback=self._schedule_update_progress,
                 stop_flag_check=lambda: not self._register_capture_running
             )
-            # === KẾT THÚC ===
             
         except Exception as e:
             print(f"[REGISTER_AI_SCREEN] Lỗi luồng đăng ký: {e}")
             self._schedule_update_progress(0, self.num_images_target, f"Lỗi nghiêm trọng: {e}", error=True)
-            success = False
+            reg_data = None
         
         if self._register_capture_running and self.winfo_exists():
-            self.after(0, self._on_registration_finished, success)
+            self.after(0, self._on_registration_finished, reg_data)
 
-    def _on_registration_finished(self, success):
+    def _on_registration_finished(self, reg_data):
         """(CHẠY TRÊN LUỒNG UI)"""
         self.controller.stop_camera_service()
         if not self.winfo_exists(): return
 
-        if success:
+        if reg_data: # Nếu reg_data có dữ liệu (Thành công)
             self.feedback_label.configure(text="Đăng ký khuôn mặt thành công!", text_color="green")
-            registration_data = self.controller.db_manager.get_customer_by_id(self.local_user_id)
+            
+            # ======================================================================
+            # GỌI HÀM BẤT ĐỒNG BỘ ĐỂ LƯU DATABASE, FAISS VÀ GỬI SERVER (PHẦN 3 & 4)
+            # ======================================================================
+            self.ai_system.finalize_registration_async(
+                user_id=self.local_user_id,
+                name=self.name,
+                phone=self.phone,
+                email=self.email,
+                password=self.password,
+                points=0,          # Khách mới đăng ký mặc định 0 điểm
+                reg_data=reg_data  # Gói dữ liệu chứa Vector và ZIP nén từ RAM
+            )
+            # ======================================================================
+
+            # Tự động đăng nhập cho khách hàng ở UI
+            registration_data = {"code": self.local_user_id, "name": self.name, "phone": self.phone, "points": 0}
             self.controller._on_background_task_complete(
                 registration_data=registration_data,
                 error_message=None,
                 register_window=self.original_register_window
             )
-            threading.Thread(
-                target=self.controller._background_registration_and_embedding,
-                args=(self.name, self.phone, self.email, self.password, self.original_register_window, self.local_user_id),
-                daemon=True
-            ).start()
+            
             self.after(1500, self.destroy) 
         else:
             # Nếu thất bại (hoặc bị hủy), rollback
@@ -182,7 +192,7 @@ class AIFaceRegistrationScreen(tk.Toplevel):
                 error_message="Không thể tạo dữ liệu khuôn mặt. Vui lòng thử lại.",
                 register_window=self.original_register_window
             )
-            self.destroy() 
+            self.destroy()
 
     def _abort_face_capture(self):
         """Hủy quy trình chụp và quay lại form đăng ký."""

@@ -165,6 +165,50 @@ class VendingAPIManager:
         except requests.RequestException as e:
             logging.error(f"API: Lỗi mạng khi đồng bộ giao dịch: {e}")
             return False
+        
+    def upload_customer_face_data(self, user_id, name, phone, email, password, points, face_vector, images_zip_bytes):
+        """
+        Gửi toàn bộ dữ liệu khách hàng bao gồm thông tin cá nhân, mật khẩu, điểm số, 
+        vector đặc trưng khuôn mặt và ảnh ZIP nén lên Server.
+        """
+        endpoint = f"{SERVER_URL}/api/customers/register_face"
+        
+        # Đóng gói các file nhị phân
+        files = {
+            'images_zip': ('offline_images.zip', images_zip_bytes, 'application/zip'),
+            'face_vector': ('vector.npy', face_vector.tobytes(), 'application/octet-stream')
+        }
+        
+        # Bổ sung đầy đủ mật khẩu và điểm số vào Form Data gửi lên Server
+        data = {
+            'user_id': user_id,
+            'name': name,
+            'phone': phone,
+            'email': email,
+            'password': password,  
+            'points': int(points),
+            'device_id': DEVICE_ID
+        }
+        
+        headers = API_HEADERS.copy()
+        headers.pop('Content-Type', None) # Để requests tự sinh boundary cho multipart
+        
+        try:
+            response = requests.post(endpoint, headers=headers, data=data, files=files, timeout=10)
+            
+            if response.status_code == 200 and response.json().get('success'):
+                logging.info(f"API: Đã đồng bộ hoàn toàn thông tin tài khoản và khuôn mặt cho khách {name} lên Server.")
+                return True, ""
+            else:
+                error_msg = f"HTTP {response.status_code} - {response.text}"
+                logging.warning(f"API: Server từ chối gói tin đồng bộ: {error_msg}")
+                return False, error_msg
+        except requests.exceptions.Timeout:
+            logging.error(f"API: Timeout (10s) khi gửi gói dữ liệu tài khoản và khuôn mặt cho {user_id}.")
+            return False, "Timeout"
+        except requests.RequestException as e:
+            logging.error(f"API: Lỗi kết nối mạng khi tải dữ liệu đồng bộ lên: {e}")
+            return False, str(e)
 
 api_manager = VendingAPIManager()
 # --- END OF FILE core/features/api_manager.py ---

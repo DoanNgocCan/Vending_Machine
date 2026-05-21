@@ -126,8 +126,8 @@ def main():
         flask_thread = threading.Thread(target=run_flask_app, daemon=True)
         flask_thread.start()
         
-        # Bắt đầu luồng đồng bộ định kỳ (chạy sau mỗi X phút)
-        sync_manager.start()
+        # Bắt đầu luồng đồng bộ định kỳ (chạy ngầm quét face data & giao dịch mỗi 3 phút)
+        sync_manager.start_auto_sync(interval_minutes=3)
 
         # Bắt đầu luồng lắng nghe tín hiệu thanh toán từ Flask
         check_payment_queue(root, ui_instance, shopping_logic, flask_to_tkinter_queue)

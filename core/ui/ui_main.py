@@ -29,8 +29,8 @@ class MainView:
         self.root.overrideredirect(True)
         
         # --- 2. LAYOUT CHÍNH (Chia làm 2 phần: Trái & Phải) ---
-        product_padx = 20
-        product_pady = 20
+        product_padx = 25
+        product_pady = 25
         
         # [LEFT] Frame chứa danh sách sản phẩm
         self.product_display_frame = tk.Frame(self.root, bg="white")
@@ -124,12 +124,16 @@ class MainView:
         action_frame = tk.Frame(self.control_frame, bg="lightgray")
         action_frame.pack(pady=8, fill=tk.X)
         
-        tk.Button(action_frame, text="THÊM VÀO GIỎ", font=("Arial", 16, "bold"), bg="green", fg="white", height=3, 
-                  command=self.controller.on_confirm_add).pack(fill=tk.X, pady=2, padx=10)
-        
-        tk.Button(action_frame, text="THANH TOÁN", font=("Arial", 16, "bold"), bg="red", fg="white", height=3, 
-                  command=self.controller.on_ok_handler).pack(fill=tk.X, pady=2, padx=10)
-        
+        ctk.CTkButton(action_frame, text="THÊM VÀO GIỎ 🛒", font=("Arial", 18, "bold"),
+              fg_color="#28a745", hover_color="#218838", text_color="white", 
+              height=60, corner_radius=10,
+              command=self.controller.on_confirm_add).pack(fill=tk.X, pady=5, padx=10)
+
+        ctk.CTkButton(action_frame, text="THANH TOÁN 💳", font=("Arial", 18, "bold"),
+                    fg_color="#dc3545", hover_color="#c82333", text_color="white", 
+                    height=60, corner_radius=10,
+                    command=self.controller.on_ok_handler).pack(fill=tk.X, pady=5, padx=10)
+                
         # --- E. Reset & Thoát ---
         control_buttons_frame = tk.Frame(self.control_frame, bg="lightgray")
         control_buttons_frame.pack(pady=5, fill=tk.X)
@@ -141,12 +145,22 @@ class MainView:
                   command=self.controller.return_to_welcome).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
 
         # --- F. Hiển thị Giỏ hàng ---
-        cart_frame = tk.Frame(self.control_frame, bg="lightgray")
+        # 1. Khởi tạo khung chứa tổng (Dòng này bị thiếu gây ra lỗi)
+        cart_frame = tk.Frame(self.control_frame, bg="lightgray") 
         cart_frame.pack(pady=5, fill=tk.BOTH, expand=True)
         tk.Label(cart_frame, text="Giỏ Hàng", font=("Arial", 20, "bold"), bg="lightgray").pack(pady=(0,3))
         
-        self.selected_items_display = tk.Text(cart_frame, height=10, width=30, font=("Arial", 23), wrap=tk.WORD, bd=3, relief=tk.RIDGE)
-        self.selected_items_display.pack(fill=tk.BOTH, expand=True, padx=3, pady=3)
+        # 2. Khung bo góc hiện đại bọc bên ngoài Text
+        cart_container = ctk.CTkFrame(cart_frame, corner_radius=10, fg_color="white", border_width=1, border_color="#cccccc")
+        cart_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        cart_container.pack_propagate(False)
+        
+        # 3. Widget Text (Đã bỏ viền, nền trắng cho đồng bộ)
+        self.selected_items_display = tk.Text(
+            cart_container, height=10, width=30, font=("Arial", 23), 
+            wrap=tk.WORD, bd=0, relief=tk.FLAT, bg="white", highlightthickness=0
+        )
+        self.selected_items_display.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Cập nhật hiển thị giỏ hàng lần đầu (nếu có dữ liệu cũ)
         self.controller.update_cart_display_handler()
@@ -242,10 +256,13 @@ class MainView:
         display_text = f"Ô {slot}: {item_name}\n{status_text}"
 
         item_frame = tk.Button(
-            self.product_display_frame, bd=2, relief=tk.RAISED,
+            self.product_display_frame, 
+            bd=1,                  # Giảm độ dày viền
+            relief=tk.SOLID,       # Chuyển từ RAISED sang SOLID hoặc FLAT
             bg=btn_bg, activebackground=btn_bg,
             compound=tk.TOP, state=btn_state,
-            disabledforeground=text_color
+            disabledforeground=text_color,
+            highlightbackground="#cccccc" # Thêm viền xám nhạt
         )
 
         # Xử lý hình ảnh (có cache thông minh)
@@ -415,33 +432,79 @@ class MainView:
         threading.Thread(target=fetch_data, daemon=True).start()
 
     def show_recommendation_popup(self, product, user_name):
-        """Vẽ popup đề xuất với lời chào cá nhân hóa và ngôn ngữ tự nhiên"""
+        """Vẽ popup đề xuất với lời chào cá nhân hóa và phân loại sản phẩm thông minh"""
         recommended_name = product['name']
         recommended_price = product['price']
         
-        # --- LOGIC CÁ NHÂN HÓA LỜI CHÀO ---
+        # --- PHÂN LOẠI SẢN PHẨM THÔNG MINH ---
+        lower_name = recommended_name.lower()
+        
+        # Nhóm đồ uống
+        if any(kw in lower_name for kw in ['nước', 'trà', 'cà phê', 'coffee', 'coca', 'pepsi', 'sting', 'bò húc', 'sữa']):
+            don_vi = random.choice(["lon", "chai"])
+            hanh_dong = random.choice(["giải khát", "uống", "làm ngụm"])
+            tinh_tu = random.choice(["mát lạnh", "sảng khoái"])
+            
+        # Nhóm đồ ăn vặt / Snack
+        elif any(kw in lower_name for kw in ['snack', 'bánh', 'kẹo', 'khoai tây', 'oreo', 'chocopie', 'đậu phộng']):
+            don_vi = random.choice(["gói", "hộp", "chiếc"])
+            hanh_dong = random.choice(["nhâm nhi", "lót dạ", "ăn vặt"])
+            tinh_tu = random.choice(["giòn rụm", "ngon nghẻ"])
+            
+        # Fallback (Mặc định cho các món không rõ phân loại)
+        else:
+            don_vi = "phần"
+            hanh_dong = "thưởng thức"
+            tinh_tu = "tuyệt vời"
+
+        # --- LOGIC CÁ NHÂN HÓA LỜI CHÀO THEO THỜI GIAN ---
         hour = datetime.now().hour
         if 5 <= hour < 11:
-            time_greeting = "Chúc bạn một buổi sáng năng lượng"
+            greetings = [
+                f"Chào buổi sáng rực rỡ, {user_name}! ☀️",
+                f"Nạp năng lượng cho ngày mới thôi, {user_name} ơi!",
+                f"Sáng nay {user_name} đã dùng gì chưa?",
+                f"Khởi đầu ngày mới thật bùng nổ nhé {user_name}!"
+            ]
         elif 11 <= hour < 14:
-            time_greeting = "Nghỉ trưa chút thôi"
+            greetings = [
+                f"Giờ nghỉ trưa đến rồi, thư giãn chút nhé {user_name}! 🍱",
+                f"Làm việc mệt rồi, tự thưởng cho mình chút gì đó đi {user_name}.",
+                f"Trưa rồi, bổ sung năng lượng để chiều làm việc tiếp nào!",
+                f"{user_name} đừng bỏ bữa trưa nhé!"
+            ]
         elif 14 <= hour < 18:
-            time_greeting = "Nạp năng lượng cho buổi chiều nhé"
+            greetings = [
+                f"Vực lại tinh thần buổi chiều nào {user_name}! 💪",
+                f"Chiều rồi, kiếm chút gì {hanh_dong} cho đỡ buồn ngủ nhé!",
+                f"Nghỉ tay vài phút, {hanh_dong} chút gì đó cho thư thả nha.",
+                f"Gần hết ngày làm việc rồi, cố lên {user_name} ơi!"
+            ]
         else:
-            time_greeting = "Tối muộn rồi, nghỉ ngơi thôi"
+            greetings = [
+                f"Tối muộn rồi, {user_name} nhớ nghỉ ngơi sớm nhé! 🌙",
+                f"Vẫn còn thức sao {user_name}? Ghé máy mua đồ là chuẩn bài rồi.",
+                f"Đêm hôm cần {hanh_dong} gì cứ để hệ thống lo nhé!",
+                f"Thư giãn buổi tối thôi {user_name}!"
+            ]
 
-        greetings = [
-            f"{time_greeting}, {user_name}! ✨",
-            f"Rất vui được gặp lại {user_name}!",
-            f"Chào {user_name}, hôm nay của bạn thế nào?",
-            f"Lại là {user_name} đây rồi! 👋"
-        ]
-        
+        # --- TẠO CÂU GỢI Ý ĐỘNG ---
         suggest_texts = [
-            f"Hệ thống thấy '{recommended_name}' là 'chân á' của bạn. Làm một lon nhé?",
-            f"Vẫn là hương vị quen thuộc '{recommended_name}' chứ?",
-            f"Đã lâu không gặp, bạn có muốn thưởng thức lại '{recommended_name}' không?",
-            f"Máy vừa mới nhập thêm '{recommended_name}' dành riêng cho bạn đây!"
+            # Các câu mặc định ban đầu
+            f"Hệ thống thấy bạn rất chuộng '{recommended_name}'. Làm ngay một {don_vi} để {hanh_dong} nhé?",
+            f"Món 'ruột' của bạn đây rồi! Quất luôn một {don_vi} '{recommended_name}' {tinh_tu} không?",
+            f"Đã lâu không gặp, bạn có muốn {hanh_dong} lại '{recommended_name}' quen thuộc không?",
+            f"Máy vừa lên kệ '{recommended_name}' dành riêng cho bạn. Thêm 1 {don_vi} vào giỏ chứ?",
+            
+            # Các câu bổ sung thêm
+            f"Trông có vẻ bạn đang cần một {don_vi} '{recommended_name}'. Bấm nút chốt đơn luôn nhé?",
+            f"Đừng quên tự thưởng cho mình một {don_vi} '{recommended_name}' {tinh_tu} nha!",
+            f"Nghĩ đến '{recommended_name}' là thấy hợp lý rồi. Thêm ngay 1 {don_vi} vào giỏ hàng thôi!",
+            f"Gương mặt thân quen lại chọn '{recommended_name}' đúng không? Lấy ngay 1 {don_vi} nào!",
+            f"Hệ thống đoán là bạn đang muốn {hanh_dong} '{recommended_name}'. Chọn luôn cho nóng nhé!",
+            f"Chỉ thiếu một {don_vi} '{recommended_name}' {tinh_tu} nữa là hoàn hảo. Bạn có muốn lấy không?",
+            f"Cơ sở dữ liệu báo rằng bạn rất thích '{recommended_name}'! Ủng hộ máy 1 {don_vi} nhé?",
+            f"Chưa biết chọn gì thì cứ '{recommended_name}' mà tiến thôi. Bấm mua ngay nào!"
         ]
 
         final_greeting = random.choice(greetings)
@@ -467,7 +530,7 @@ class MainView:
         self.current_recommended_slot = str(target_slot)
 
         # 2. VẼ GIAO DIỆN
-        popup_w, popup_h = 680, 580
+        popup_w, popup_h = 800, 600  # Tăng chiều rộng lên 800 (cũ là 680)
         self.recommendation_overlay = ctk.CTkFrame(
             self.root, width=popup_w, height=popup_h,
             fg_color="#014b91", corner_radius=25, border_width=3, border_color="#FFD700"
@@ -475,11 +538,15 @@ class MainView:
         self.recommendation_overlay.place(relx=0.5, rely=0.5, anchor="center")
         self.recommendation_overlay.pack_propagate(False)
 
+        # Đã thêm wraplength=popup_w - 60 để chữ tự động xuống dòng
         tk.Label(self.recommendation_overlay, text=final_greeting, 
-                 font=("Arial", 24, "bold"), bg="#014b91", fg="white").pack(pady=(30, 5))
+                 font=("Arial", 24, "bold"), bg="#014b91", fg="white", 
+                 wraplength=popup_w - 60).pack(pady=(30, 5))
         
+        # Chỉnh lại wraplength đồng bộ với khung
         tk.Label(self.recommendation_overlay, text=final_suggest, 
-                 font=("Arial", 14, "italic"), bg="#014b91", fg="#e0e0e0", wraplength=600).pack(pady=(0, 15))
+                 font=("Arial", 14, "italic"), bg="#014b91", fg="#e0e0e0", 
+                 wraplength=popup_w - 60).pack(pady=(0, 15))
 
         # 3. HIỂN THỊ ẢNH
         product_id = str(target_slot)
@@ -515,13 +582,12 @@ class MainView:
         btn_frame = tk.Frame(self.recommendation_overlay, bg="#014b91")
         btn_frame.pack(pady=25)
         
-        # [QUAN TRỌNG]: Đã xóa recommended_price ra khỏi lambda
-        ctk.CTkButton(btn_frame, text="MUA LUÔN 🛒", font=("Arial", 18, "bold"), fg_color="#4CAF50", 
-                      width=220, height=55, corner_radius=15,
+        ctk.CTkButton(btn_frame, text="MUA LUÔN 🛒", font=("Arial", 22, "bold"), fg_color="#4CAF50", 
+                      width=280, height=75, corner_radius=20,
                       command=lambda: self.accept_recommendation(target_slot, recommended_name, self.popup_qty.get())).pack(side="left", padx=20)
         
-        ctk.CTkButton(btn_frame, text="ĐỂ SAU NHÉ", font=("Arial", 18, "bold"), fg_color="#555555", 
-                      width=200, height=55, corner_radius=15,
+        ctk.CTkButton(btn_frame, text="ĐỂ SAU NHÉ", font=("Arial", 22, "bold"), fg_color="#555555", 
+                      width=280, height=75, corner_radius=20,
                       command=self.close_recommendation_popup).pack(side="right", padx=20)
     def close_recommendation_popup(self):
         """Đóng thông báo và cho phép người dùng chọn món bình thường"""

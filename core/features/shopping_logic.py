@@ -74,3 +74,17 @@ class ShoppingLogic:
     
     def clear_current_entry(self):
         self.current_entry_buffer = ""
+
+    def auto_login_after_register(self, user_id, name, phone):
+        """
+        Được gọi ngay sau khi đăng ký thành công ở màn UI.
+        Tự động thiết lập phiên mua sắm cho khách hàng mới để họ mua hàng được ngay.
+        """
+        customer_data = {
+            'code': user_id,     # Mã UID của hệ thống
+            'name': name,        
+            'phone': phone,
+            'points': 0          # Khách mới đăng ký chưa có điểm
+        }
+        self.set_customer(customer_data)
+        return True
