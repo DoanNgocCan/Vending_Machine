@@ -490,13 +490,12 @@ class AdvancedUIManager:
                     try:
                         current_mtime = os.path.getmtime(img_path)
                         img = Image.open(img_path)
-                        img = img.resize(img_size, Image.Resampling.LANCZOS)
                         
                         # LƯU Ý THAY ĐỔI Ở ĐÂY: Lưu dạng dictionary thay vì chỉ lưu đối tượng PhotoImage
                         self.cached_product_images[slot] = {
                             "path": img_path,
                             "mtime": current_mtime,
-                            "image": ImageTk.PhotoImage(img)
+                            "image": ctk.CTkImage(light_image=img, size=img_size)
                         }
                     except Exception as e:
                         print(f"Lỗi tải ảnh sản phẩm '{item_name}' (Ô số {slot}): {e}")
@@ -530,11 +529,11 @@ class AdvancedUIManager:
             return
         if self.selected_button and self.selected_button.winfo_exists():
             try:
-                self.selected_button.config(relief=tk.RAISED, bg="lightyellow", activebackground="lightyellow")
+                self.selected_button.configure(fg_color="#ffffff", border_color="#cccccc", border_width=1.5)
             except: pass
         if button and button.winfo_exists():
             try:
-                button.config(relief=tk.SUNKEN, bg="lightgreen", activebackground="lightgreen")
+                button.configure(fg_color="#d4edda", border_color="#28a745", border_width=1.5)
                 self.selected_button = button
             except: pass
             
@@ -576,7 +575,7 @@ class AdvancedUIManager:
     def _deselect_product(self):
         if self.selected_button and self.selected_button.winfo_exists():
             try:
-                self.selected_button.config(relief=tk.RAISED, bg="lightyellow", activebackground="lightyellow")
+                self.selected_button.configure(fg_color="#ffffff", border_color="#cccccc", border_width=1.5)
             except: pass
         self.selected_button = None
         self.selected_product = None

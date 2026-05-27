@@ -519,7 +519,7 @@ class FaceRecognitionHandler:
 
         if progress_callback:
             progress_callback(num_images_to_capture, num_images_to_capture, "Đang xử lý kết quả...")
-
+        
         if liveness_failures > (num_images_to_capture * 0.4):
             print(
                 f"[LOGIN] TỪ CHỐI ĐĂNG NHẬP: Phát hiện tấn công giả mạo {liveness_failures}/{num_images_to_capture} frames."

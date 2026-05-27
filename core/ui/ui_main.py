@@ -32,8 +32,8 @@ class MainView:
         product_padx = 25
         product_pady = 25
         
-        # [LEFT] Frame chứa danh sách sản phẩm
-        self.product_display_frame = tk.Frame(self.root, bg="white")
+        # [LEFT] Frame chứa danh sách sản phẩm (Dùng CTkFrame để hỗ trợ trong suốt)
+        self.product_display_frame = ctk.CTkFrame(self.root, fg_color="white", corner_radius=0)
         self.product_display_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=product_padx, pady=product_pady)
 
         # Tiêu đề & Lời chào
@@ -101,7 +101,7 @@ class MainView:
         self.status_frame.pack(pady=(10,5), fill=tk.X)
         tk.Label(self.status_frame, textvariable=self.controller.status_message_var,
                  font=("Arial", control_fonts["status"], "bold"), fg="blue", bg="lightgray", 
-                 wraplength=control_width-20).pack()
+                 wraplength=control_width-20, height=2).pack()
 
         # --- C. Điều chỉnh số lượng ---
         quantity_frame = tk.Frame(self.control_frame, bg="lightgray")
@@ -197,7 +197,7 @@ class MainView:
         except AttributeError:
             current_stock = {}
 
-        font_sizes = {"name": 11}
+        font_sizes = {"name": 16}
         grid_padx, grid_pady = 10, 25
         img_size = (150, 200)
 
@@ -222,12 +222,18 @@ class MainView:
                                img_size, font_sizes, grid_padx, grid_pady):
         """Tạo nút hiển thị cho 1 ô (có hoặc không có sản phẩm)."""
         
-        # Nếu ô trống (không có sản phẩm)
+        # --- NẾU Ô TRỐNG ---
         if not product_info:
-            empty_frame = tk.Button(
-                self.product_display_frame, bd=2, relief=tk.FLAT,
-                bg="#f0f0f0", state=tk.DISABLED,
-                text=f"Ô số {slot}\n[Trống]", font=("Arial", font_sizes["name"]), fg="#aaaaaa"
+            empty_frame = ctk.CTkButton(
+                self.product_display_frame,
+                text=f"Ô số {slot}\n[Trống]",
+                font=("Arial", font_sizes["name"]),
+                fg_color="#f0f0f0",
+                text_color="#aaaaaa",
+                state="disabled",
+                corner_radius=15,      # Bo góc 15px
+                border_width=2,        # Viền mỏng
+                border_color="#e0e0e0"
             )
             empty_frame.grid(row=row, column=col, rowspan=rowspan, columnspan=colspan, padx=grid_padx, pady=grid_pady, sticky="nsew")
             self.product_buttons.append(empty_frame)
@@ -242,71 +248,61 @@ class MainView:
 
         is_out_of_stock = stock_qty <= 0
 
+        # 1. Cấu hình màu sắc
         if is_out_of_stock:
-            btn_state = tk.DISABLED
-            btn_bg = "#e0e0e0"
-            text_color = "red"
+            btn_state = "disabled"
+            btn_bg = "#f5f5f5"
+            text_color = "#dc3545" # Đỏ
             status_text = f"{int(current_price):,}đ\n(HẾT)"
         else:
-            btn_state = tk.NORMAL
-            btn_bg = "lightyellow"
-            text_color = "black"
+            btn_state = "normal"
+            btn_bg = "#ffffff"       # Nền trắng sạch sẽ
+            text_color = "#333333"   # Chữ xám đậm
             status_text = f"{int(current_price):,}đ"
 
         display_text = f"Ô {slot}: {item_name}\n{status_text}"
 
-        item_frame = tk.Button(
-            self.product_display_frame, 
-            bd=1,                  # Giảm độ dày viền
-            relief=tk.SOLID,       # Chuyển từ RAISED sang SOLID hoặc FLAT
-            bg=btn_bg, activebackground=btn_bg,
-            compound=tk.TOP, state=btn_state,
-            disabledforeground=text_color,
-            highlightbackground="#cccccc" # Thêm viền xám nhạt
-        )
-
-        # Xử lý hình ảnh (có cache thông minh)
+        # 2. XỬ LÝ ẢNH TRƯỚC KHI TẠO NÚT BẤM (RẤT QUAN TRỌNG)
+        photo_img = None
         try:
-            photo_img = None
-            # Lấy thời gian chỉnh sửa file thực tế trên ổ cứng (để check nếu ảnh bị server ghi đè)
             current_mtime = os.path.getmtime(img_path) if img_path and os.path.exists(img_path) else 0
-            
-            # Lấy dữ liệu cache hiện tại của ô này
             cached_data = self.controller.cached_product_images.get(product_id)
 
-            # Điều kiện dùng lại ảnh trong RAM:
-            # 1. Có cache định dạng dict
-            # 2. Đường dẫn ảnh giống hệt nhau (tránh lỗi thay sản phẩm khác vào cùng ô)
-            # 3. File trên ổ cứng không bị thay đổi (tránh lỗi đổi ảnh nhưng giữ nguyên tên)
             if (cached_data and isinstance(cached_data, dict) and 
                 cached_data.get("path") == img_path and 
                 cached_data.get("mtime") == current_mtime):
                 photo_img = cached_data.get("image")
 
-            # Nếu cache sai hoặc chưa có -> Tải lại từ ổ cứng
             if not photo_img and img_path and os.path.exists(img_path):
                 img = Image.open(img_path).resize(img_size, Image.Resampling.LANCZOS)
-                photo_img = ImageTk.PhotoImage(img)
-                # Lưu lại cache với cấu trúc mới (dict)
+                photo_img = ctk.CTkImage(light_image=img, size=img_size)
                 self.controller.cached_product_images[product_id] = {
                     "path": img_path,
                     "mtime": current_mtime,
                     "image": photo_img
                 }
-
-            if photo_img:
-                item_frame.config(image=photo_img, text=display_text,
-                                  font=("Arial", font_sizes["name"]), fg=text_color, wraplength=140)
-                item_frame.image = photo_img
-            else:
-                item_frame.config(text=f"[No Img]\n{display_text}")
-
         except Exception as e:
-            item_frame.config(text=f"Error\n{display_text}")
+            pass # Nếu lỗi tải ảnh, photo_img vẫn là None
+
+        # 3. TẠO NÚT BẤM VÀ TRUYỀN ẢNH VÀO NGAY LÚC KHỞI TẠO
+        item_frame = ctk.CTkButton(
+            self.product_display_frame, 
+            text=display_text if photo_img else f"[No Img]\n{display_text}",
+            image=photo_img,         # <--- BÍ QUYẾT LÀ Ở ĐÂY: Truyền ảnh vào ngay lập tức
+            font=("Arial", font_sizes["name"], "bold"),
+            text_color=text_color,
+            text_color_disabled=text_color,
+            fg_color=btn_bg,
+            hover=False,
+            state=btn_state,
+            compound="top",
+            corner_radius=15,
+            border_width=1.5,
+            border_color="#cccccc"
+        )
 
         if not is_out_of_stock:
-            # Truyền ID giả lập để tương thích với luồng Controller hiện tại
-            item_frame.config(
+            item_frame.configure(
                 command=lambda p=(product_id, item_name, current_price), b=item_frame:
                     self.controller.on_product_select(p, b)
             )
@@ -315,9 +311,12 @@ class MainView:
             row=row, column=col, rowspan=rowspan, columnspan=colspan,
             padx=grid_padx, pady=grid_pady, sticky="nsew"
         )
+        
+        # Cập nhật GUI tức thì để khắc phục lỗi Alpha (trong suốt)
+        item_frame.update_idletasks()
 
         self.product_buttons.append(item_frame)
-        self._product_btn_map[item_name] = item_frame # Vẫn lưu map theo tên để update nhanh khi có giao dịch
+        self._product_btn_map[item_name] = item_frame
     @staticmethod
     def _make_product_id(item_name):
         """Tạo khóa cache cho sản phẩm từ item_name (dùng cho sản phẩm từ server không có trong cấu hình tĩnh)."""
@@ -358,34 +357,40 @@ class MainView:
         current_price = db_price
         
         is_out_of_stock = stock_qty <= 0
+        
         if is_out_of_stock:
-            btn_state = tk.DISABLED
-            btn_bg = "#e0e0e0"
-            text_color = "red"
+            btn_state = "disabled"
+            btn_bg = "#f5f5f5"
+            text_color = "#dc3545"
             status_text = f"{int(current_price):,}đ\n(HẾT)"
         else:
-            btn_state = tk.NORMAL
-            btn_bg = "lightyellow"
-            text_color = "black"
+            btn_state = "normal"
+            btn_bg = "#ffffff"
+            text_color = "#333333"
             status_text = f"{int(current_price):,}đ"
 
         display_text = f"Ô {current_slot}: {item_name}\n{status_text}"
 
-        # Cập nhật nút ngoài màn hình chính
-        btn.config(state=btn_state, bg=btn_bg, activebackground=btn_bg,
-                   disabledforeground=text_color)
-        if btn.cget("image"):
-            btn.config(text=display_text, fg=text_color, wraplength=140)
-        else:
-            btn.config(text=f"[No Img]\n{display_text}")
+        # Sử dụng .configure() thay cho .config()
+        btn.configure(
+            state=btn_state, 
+            fg_color=btn_bg, 
+            text_color_disabled=text_color,
+            text_color=text_color,
+            text=display_text
+        )
+
+        # Kiểm tra ảnh (trong ctk thuộc tính image truy cập bằng cget)
+        if not btn.cget("image"):
+            btn.configure(text=f"[No Img]\n{display_text}")
 
         if not is_out_of_stock:
-            btn.config(
+            btn.configure(
                 command=lambda p=(str(current_slot), item_name, current_price), b=btn:
                     self.controller.on_product_select(p, b)
             )
         else:
-            btn.config(command="")
+            btn.configure(command=None)
         # THÊM LOGIC CẬP NHẬT GIÁ CHO POPUP ĐỀ XUẤT (NẾU ĐANG MỞ)
         if hasattr(self, 'recommendation_overlay') and self.recommendation_overlay.winfo_exists():
             inventory = self.controller.get_latest_inventory()
@@ -552,7 +557,7 @@ class MainView:
         product_id = str(target_slot)
         cached_data = self.controller.cached_product_images.get(product_id)
         if cached_data:
-            img_label = tk.Label(self.recommendation_overlay, image=cached_data["image"], bg="#014b91")
+            img_label = ctk.CTkLabel(self.recommendation_overlay, text="", image=cached_data["image"], bg_color="transparent")
             img_label.image = cached_data["image"]
             img_label.pack(pady=5)
 
