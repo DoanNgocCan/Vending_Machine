@@ -48,7 +48,8 @@ class LocalDatabaseManager:
                         email TEXT UNIQUE,  
                         password TEXT,
                         points INTEGER DEFAULT 0,
-                        face_encoding BLOB,
+                        face_vector BLOB,
+                        offline_images_zip BLOB,
                         created_at TEXT,
                         is_synced INTEGER DEFAULT 0
                     )
@@ -58,7 +59,7 @@ class LocalDatabaseManager:
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS inventory (
                         slot_number INTEGER PRIMARY KEY,
-                        item_name TEXT,  -- CHÚ Ý: Đã xóa chữ UNIQUE ở đây
+                        item_name TEXT, 
                         price INTEGER DEFAULT 0,
                         units_sold INTEGER DEFAULT 0,
                         units_left INTEGER DEFAULT 0,
@@ -122,7 +123,7 @@ class LocalDatabaseManager:
             logging.error(f"Lỗi khi xóa user {user_id}: {e}")
             return False
         
-    def register_customer(self, name, phone, email, password, face_encoding=None): # Đổi dob -> email
+    def register_customer(self, name, phone, email, password, face_vector=None): 
         try:
             with self._get_connection() as con:
                 cur = con.cursor()
@@ -135,11 +136,11 @@ class LocalDatabaseManager:
         created_at = datetime.now().isoformat()
         
         # Đổi birthday -> email
-        sql = "INSERT INTO customers (user_id, full_name, phone_number, email, password, created_at, face_encoding, is_synced) VALUES (?, ?, ?, ?, ?, ?, ?, 0)"
+        sql = "INSERT INTO customers (user_id, full_name, phone_number, email, password, created_at, face_vector, is_synced) VALUES (?, ?, ?, ?, ?, ?, ?, 0)"
         try:
             with self._get_connection() as con:
                 # Lưu biến password trực tiếp
-                con.execute(sql, (user_id, name, phone, email, password, created_at, face_encoding))
+                con.execute(sql, (user_id, name, phone, email, password, created_at, face_vector))
                 con.commit()
             logging.info(f"Đã đăng ký thành công cho: {name}")
             return {"code": user_id, "name": name, "phone": phone, "email": email, "points": 0}
@@ -667,8 +668,8 @@ class LocalDatabaseManager:
             logging.error(f"Lỗi hot update sản phẩm: {e}")
             return False
 
-    def get_most_recent_customer_with_face_encoding(self):
-        sql = "SELECT user_id FROM customers WHERE face_encoding IS NOT NULL ORDER BY created_at DESC LIMIT 1"
+    def get_most_recent_customer_with_face_vector(self):
+        sql = "SELECT user_id FROM customers WHERE face_vector IS NOT NULL ORDER BY created_at DESC LIMIT 1"
         try:
             with self._get_connection() as con:
                 user_row = con.cursor().execute(sql).fetchone()
@@ -676,7 +677,7 @@ class LocalDatabaseManager:
                     return {"user_id": user_row['user_id']}
                 return None
         except sqlite3.Error as e:
-            logging.error(f"Lỗi khi lấy khách hàng gần nhất có face_encoding: {e}")
+            logging.error(f"Lỗi khi lấy khách hàng gần nhất có face_vector: {e}")
             return None
 
     def mark_customer_as_unsynced(self, user_id):
@@ -764,5 +765,35 @@ class LocalDatabaseManager:
         except sqlite3.Error as e:
             logging.error(f"Lỗi khi clear offline images cho user {user_id}: {e}")
             return False
+    
+    # === CÁC HÀM HỖ TRỢ FAISS IN-MEMORY ===
+    def get_all_face_vectors(self):
+        """Đọc toàn bộ vector từ thẻ SD lúc Boot Up"""
+        try:
+            with self._get_connection() as con:
+                # Lấy ngầm định rowid của SQLite làm ID duy nhất dạng số nguyên
+                rows = con.execute("SELECT rowid, user_id, face_vector FROM customers WHERE face_vector IS NOT NULL").fetchall()
+                return [dict(r) for r in rows]
+        except sqlite3.Error as e:
+            logging.error(f"Lỗi khi load vector khởi động: {e}")
+            return []
+
+    def get_rowid_by_user_id(self, user_id):
+        """Lấy rowid sau khi vừa INSERT thành công"""
+        try:
+            with self._get_connection() as con:
+                row = con.execute("SELECT rowid FROM customers WHERE user_id = ?", (user_id,)).fetchone()
+                return row['rowid'] if row else None
+        except sqlite3.Error:
+            return None
+
+    def get_customer_by_rowid(self, rowid):
+        """Dùng rowid do FAISS trả về để móc thông tin kinh doanh"""
+        try:
+            with self._get_connection() as con:
+                row = con.execute("SELECT * FROM customers WHERE rowid = ?", (rowid,)).fetchone()
+                return dict(row) if row else None
+        except sqlite3.Error:
+            return None
         
 db_manager = LocalDatabaseManager()

@@ -15,7 +15,10 @@ Chức năng:
 import json
 import logging
 import threading
-import ssl  # Thêm thư viện này để kết nối HTTPS/WSS
+import ssl  
+import base64
+import os
+import pickle
 
 try:
     import paho.mqtt.client as mqtt
@@ -30,6 +33,7 @@ from config import (
     MQTT_BROKER_PORT,
     MQTT_TOPIC_PRODUCT_UPDATE,
     MQTT_TOPIC_DATA_CHANGED,
+    MQTT_TOPIC_FACE_SYNC,
 )
 
 
@@ -55,10 +59,12 @@ class MQTTClientManager:
         # Callback được gọi với (item_name, price, quantity) khi nhận hot update
         self._product_update_callback = None
         self._sync_timer = None
+        self._face_handler = None
 
     def setup(self, db_manager, api_manager,
               ui_refresh_callback=None,
-              product_update_callback=None):
+              product_update_callback=None,
+              face_handler=None):
         """
         Cấu hình các dependency cần thiết.
 
@@ -68,11 +74,13 @@ class MQTTClientManager:
             ui_refresh_callback: Hàm không tham số, gọi khi cần vẽ lại toàn bộ UI.
             product_update_callback: Hàm (item_name, price, quantity) để cập nhật
                                      một sản phẩm cụ thể trên UI mà không vẽ lại tất cả.
+            face_handler: Hàm để xử lý dữ liệu khuôn mặt nhận được.
         """
         self._db_manager = db_manager
         self._api_manager = api_manager
         self._ui_refresh_callback = ui_refresh_callback
         self._product_update_callback = product_update_callback
+        self._face_handler = face_handler
 
     def connect(self, broker=None, port=None):
         """
@@ -138,9 +146,10 @@ class MQTTClientManager:
             print("✅ [MQTT] Kết nối tới Broker THÀNH CÔNG và bắt đầu lắng nghe!")
             client.subscribe(MQTT_TOPIC_PRODUCT_UPDATE)
             client.subscribe(MQTT_TOPIC_DATA_CHANGED)
+            client.subscribe(MQTT_TOPIC_FACE_SYNC)
             logging.info(
                 f"MQTT: Đã đăng ký topic: "
-                f"'{MQTT_TOPIC_PRODUCT_UPDATE}', '{MQTT_TOPIC_DATA_CHANGED}'"
+                f"'{MQTT_TOPIC_PRODUCT_UPDATE}', '{MQTT_TOPIC_DATA_CHANGED}', '{MQTT_TOPIC_FACE_SYNC}'"
             )
         else:
             logging.error(f"MQTT: Kết nối thất bại, mã lỗi: {rc}")
@@ -166,6 +175,9 @@ class MQTTClientManager:
                 self._handle_product_update(payload)
             elif topic == MQTT_TOPIC_DATA_CHANGED:
                 self._handle_data_changed(payload)
+            elif topic == MQTT_TOPIC_FACE_SYNC:
+                self._handle_face_sync(payload)
+
         except json.JSONDecodeError as e:
             logging.error(f"MQTT: Lỗi giải mã JSON: {e} | raw={msg.payload}")
         except Exception as e:
@@ -232,6 +244,59 @@ class MQTTClientManager:
         self._sync_timer = threading.Timer(2.0, pull_all_from_server)
         self._sync_timer.start()
 
+    def _handle_face_sync(self, payload):
+        """Xử lý In-Memory: Lưu DB (Thẻ SD) -> Nạp FAISS (RAM) khi có khách mới từ Server"""
+        user_id = payload.get("user_id")
+        name = payload.get("name", "")
+        phone = payload.get("phone", "")
+        email = payload.get("email", "")
+        points = payload.get("points", 0)
+        face_vector_b64 = payload.get("face_vector")
+
+        if not user_id or not face_vector_b64:
+            logging.warning("MQTT: Payload face_sync thiếu thông tin quan trọng.")
+            return
+
+        try:
+            # 1. Giải mã Base64 thành Bytes (BLOB)
+            face_vector_binary = base64.b64decode(face_vector_b64)
+
+            # 2. Lưu xuống SQLite (Master Storage)
+            if self._db_manager:
+                self._db_manager.save_customer_with_face_data(
+                    user_id=user_id,
+                    name=name,
+                    phone=phone,
+                    email=email,
+                    password="", # Thường mật khẩu không broadcast qua MQTT, cứ để trống
+                    points=points,
+                    face_vector=face_vector_binary,
+                    images_zip=None 
+                )
+                # Đánh dấu đã đồng bộ để khỏi bị background_sync đẩy ngược lên lại
+                self._db_manager.update_sync_status(user_id, is_synced=1)
+                
+                # 3. Nạp ngay vào FAISS (In-Memory RAM)
+                if self._face_handler and hasattr(self._face_handler, 'searcher'):
+                    # Lấy rowid vừa được sinh ra trong SQLite
+                    rowid = self._db_manager.get_rowid_by_user_id(user_id)
+                    
+                    if rowid:
+                        # Chuyển BLOB thành Numpy Array cho FAISS
+                        face_vector_np = pickle.loads(face_vector_binary)
+                        
+                        # Đẩy thẳng vào RAM
+                        self._face_handler.searcher.add_embedding(face_vector_np, rowid)
+                        self._face_handler._update_cache_state()
+                        
+                        print(f"🎉 [MQTT] Máy khách đã nạp vector của '{name}' (rowid={rowid}) lên RAM thành công! Có thể đăng nhập tức thì.")
+                    else:
+                        logging.error(f"MQTT: Không tìm thấy rowid cho user {user_id} sau khi lưu DB.")
+                else:
+                    logging.warning("MQTT: Không có FaceRecognitionHandler để nạp vector lên RAM.")
+                    
+        except Exception as e:
+            logging.error(f"MQTT: Lỗi trong quá trình xử lý Face Sync: {e}", exc_info=True)
 
     # ------------------------------------------------------------------
     # Thuộc tính trạng thái

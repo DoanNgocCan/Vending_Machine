@@ -52,11 +52,15 @@ class FaceRecognitionHandler:
         self.detector = MediaPipeFaceDetector()
         self.liveness = LivenessDetector()
         self.recognizer = ModelEmbedding(self.MODEL_NAME)
+        
+        # Khởi tạo FAISS thuần RAM
         self.searcher = FastFaceSearch(
             recognizer=self.recognizer,
-            model_name=self.MODEL_NAME,
-            db_dir=self.DATABASE_DIR,
+            model_name=self.MODEL_NAME
         )
+        
+        # Bơm dữ liệu từ DB lên FAISS lúc Boot Up
+        self.reload_cache()
 
         self.image_queue = queue.Queue(maxsize=self.IMAGE_QUEUE_SIZE)
         self.webcam_thread = threading.Thread(target=self._webcam_reader_thread, daemon=True)
@@ -74,8 +78,28 @@ class FaceRecognitionHandler:
         )
 
     def reload_cache(self):
-        print("[FR_HANDLER] Yêu cầu tải lại dữ liệu cache nhận diện...")
-        self.searcher.reload_index()
+        """Luồng Boot Up: SQLite -> RAM"""
+        print("[FR_HANDLER] Kích hoạt luồng nạp dữ liệu từ Thẻ SD lên RAM...")
+        from core.database.local_database_manager import db_manager
+        
+        records = db_manager.get_all_face_vectors()
+        vectors = []
+        rowids = []
+        
+        for r in records:
+            try:
+                # Bước 3 BOOT UP: Chuyển BLOB -> Numpy Array
+                vec = pickle.loads(r['face_vector'])
+                vectors.append(vec)
+                rowids.append(r['rowid'])
+            except Exception as e:
+                print(f"[FR_HANDLER] Lỗi parse vector của rowid {r['rowid']}: {e}")
+                
+        # Reset FAISS và nạp lại
+        self.searcher.index.reset()
+        if vectors:
+            self.searcher.load_from_db(vectors, rowids)
+            
         self._update_cache_state()
 
     # -----------------------------------------------------------------
@@ -180,14 +204,22 @@ class FaceRecognitionHandler:
         return emb_vec.astype(np.float32), False
 
     def _match_embedding(self, embedding, similarity_threshold):
+        # Bước 2 LOGIN: Yêu cầu FAISS search
         results = self.searcher.search(embedding, topk=1)
         if not results:
             return None, 0.0
 
-        best_name, best_score = results[0]
-        if best_name != "Unknown" and best_score >= similarity_threshold:
-            return best_name, best_score
-
+        best_rowid, best_score = results[0]
+        
+        # Bước 3 LOGIN: Kiểm tra Threshold
+        if best_score >= similarity_threshold:
+            # Bước 4 LOGIN: Gõ cửa SQLite lấy thông tin
+            from core.database.local_database_manager import db_manager
+            customer = db_manager.get_customer_by_rowid(best_rowid)
+            if customer:
+                # Trả về user_id (mã khách hàng) để UI xử lý tiếp
+                return customer['user_id'], best_score
+                
         return None, best_score
 
     # -----------------------------------------------------------------
@@ -346,7 +378,6 @@ class FaceRecognitionHandler:
 
             bbox, keypoints = detected_faces[0]
 
-            '''
             # 1. Kiểm tra Liveness (Anti-spoofing) và lấy Confidence Score
             is_real, liveness_score = self.liveness.check_liveness(bgr_frame, bbox)
             if not is_real:
@@ -358,12 +389,6 @@ class FaceRecognitionHandler:
                         error=True,
                     )
                 continue
-            '''
-
-            # --- CODE TEST: Ép buộc hệ thống nhận diện đây là mặt thật ---
-            is_real = True
-            liveness_score = 0.99  # Giả lập điểm liveness cao để lọt vào top keep_best
-            # -------------------------------------------------------------
 
             # 2. Kiểm tra độ sắc nét (Focus/Blur)
             gray = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
@@ -422,9 +447,8 @@ class FaceRecognitionHandler:
         
         # Gán vector vào FAISS Local ngay lập tức để người dùng có thể mua hàng ngay (Phần 3)
         try:
-            self.searcher.add_embedding(np.expand_dims(avg_vector, axis=0), customer_name)
             self._update_cache_state()
-            print(f"[REGISTER] Đã cập nhật FAISS Local cho khách hàng '{customer_name}'.")
+            print(f"[REGISTER] Đã trích xuất xong vector. Chuẩn bị lưu Database cho '{customer_name}'.")
         except Exception as e:
             print(f"[REGISTER] Cảnh báo lỗi ghi FAISS Local: {e}")
 
@@ -567,15 +591,16 @@ class FaceRecognitionHandler:
             face_vector=vector_blob,
             images_zip=None 
         )
-        print(f"[LOCAL DB] Đã lưu thông tin cơ sở cho '{name}' (Password và Points: {points}).")
+        print(f"[LOCAL DB] Đã lưu dữ liệu định danh cho '{name}' (Thẻ SD).")
 
-        # BƯỚC 2: Thêm vector vào FAISS Index của máy Pi này nhằm tối ưu trải nghiệm tức thì
-        try:
-            self.searcher.add_embedding(np.expand_dims(face_vector, axis=0), user_id)
-            self._update_cache_state()
-            print(f"[FAISS LOCAL] Đã ánh xạ khuôn mặt trực tiếp tới User ID: {user_id}")
-        except Exception as e:
-            print(f"[FAISS LOCAL] Lỗi nạp nhanh vector: {e}")
+        #BƯỚC 2 REGISTER: Móc rowid và đẩy lên FAISS
+        rowid = db_manager.get_rowid_by_user_id(user_id)
+        if rowid:
+            try:
+                self.searcher.add_embedding(face_vector, rowid)
+                self._update_cache_state()
+            except Exception as e:
+                print(f"[FAISS LOCAL] Lỗi nạp nhanh vector: {e}")
 
         # BƯỚC 3: Triển khai tác vụ mạng bất đồng bộ đẩy dữ liệu đầy đủ lên Server
         def background_upload_task():

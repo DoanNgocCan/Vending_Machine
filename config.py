@@ -35,3 +35,5 @@ MQTT_TOPIC_PRODUCT_UPDATE = os.getenv("MQTT_TOPIC_PRODUCT_UPDATE", "vending_mach
 
 # Topic MQTT báo hiệu có dữ liệu lớn cần tải qua HTTP (sản phẩm mới, ảnh...)
 MQTT_TOPIC_DATA_CHANGED = os.getenv("MQTT_TOPIC_DATA_CHANGED", "vending_machine/product/data_changed")
+
+MQTT_TOPIC_FACE_SYNC = os.getenv("MQTT_TOPIC_FACE_SYNC", "vending/sync/faces")

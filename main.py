@@ -63,45 +63,7 @@ def main():
         if LED_AVAILABLE:
             initialize_led_controller()
 
-        # 3. Configurar MQTT uma única vez com todos os callbacks.
-        #    Use a mutable container to reference ui_instance before it is created.
-        #    Os callbacks verificam ui_ref[0] no momento da chamada, não no momento da criação.
-        ui_ref = [None]
-
-        def _mqtt_ui_refresh():
-            """Yêu cầu UI vẽ lại toàn bộ lưới sản phẩm (thread-safe qua root.after)."""
-            try:
-                view = ui_ref[0]
-                if view and hasattr(view, 'main_view') and view.main_view:
-                    root.after(0, view.main_view.refresh_product_grid)
-            except Exception as e:
-                print(f"[MQTT] Lỗi khi yêu cầu refresh UI: {e}")
-
-        def _mqtt_product_update(item_name, price, quantity):
-            """Cập nhật một sản phẩm cụ thể trên UI (thread-safe)."""
-            try:
-                view = ui_ref[0]
-                if view and hasattr(view, 'main_view') and view.main_view:
-                    root.after(0, lambda: view.main_view.update_single_product(
-                        item_name, price, quantity
-                    ))
-            except Exception as e:
-                print(f"[MQTT] Lỗi khi yêu cầu cập nhật sản phẩm '{item_name}': {e}")
-
-        mqtt_manager.setup(
-            db_manager=db_manager,
-            api_manager=api_manager,
-            ui_refresh_callback=_mqtt_ui_refresh,
-            product_update_callback=_mqtt_product_update,
-        )
-        print("[MAIN] Đang kết nối MQTT broker...")
-        mqtt_connected = mqtt_manager.connect()
-        if mqtt_connected:
-            print("[MAIN] Kết nối MQTT thành công.")
-        else:
-            print("[MAIN] Không kết nối được MQTT. Sẽ dùng HTTP polling làm fallback.")
-
-        # 4. Đồng bộ dữ liệu ban đầu TRƯỚC KHI UI khởi động
+        # 3. Đồng bộ dữ liệu ban đầu TRƯỚC KHI UI khởi động
         #    Đảm bảo UI bắt đầu với dữ liệu sản phẩm mới nhất từ server.
         print("[MAIN] Chạy đồng bộ dữ liệu ban đầu...")
         sync_manager.sync_now()

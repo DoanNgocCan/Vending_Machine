@@ -117,8 +117,8 @@ class AdvancedUIManager:
                 db_manager=self.db_manager,
                 api_manager=self.api_manager,
                 ui_refresh_callback=lambda: self.root.after(100, self.main_view.refresh_product_grid),
-                # SỬA DÒNG BÊN DƯỚI: Đổi từ main_view.hot_update_ui sang self._on_hot_update
-                product_update_callback=lambda old, new, p, q: self.root.after(100, lambda: self._on_hot_update(old, new, p, q))
+                product_update_callback=lambda old, new, p, q: self.root.after(100, lambda: self._on_hot_update(old, new, p, q)),
+                face_handler=self.camera_ai_system
             )
             mqtt_manager.connect()
         except Exception as e:

@@ -67,226 +67,64 @@ class ModelEmbedding:
 
 class FastFaceSearch:
     """
-    Quản lý database FAISS, bao gồm tải, lưu cache, tìm kiếm và thêm.
+    Quản lý FAISS thuần In-Memory. 
+    Không ghi file, mapping ID số nguyên trực tiếp với rowid của SQLite.
     """
 
-    def __init__(self, recognizer, model_name="edgeface_base", db_dir="database"):
-        print("[FAISS] Khởi tạo hệ thống tìm kiếm...")
+    def __init__(self, recognizer, model_name="edgeface_base"):
+        print("[FAISS] Khởi tạo hệ thống tìm kiếm In-Memory (RAM)...")
         self.recognizer = recognizer
-        self.db_dir = db_dir
-        self.cache_file = os.path.join(self.db_dir, f"face_cache_{model_name}.pkl")
-        self.legacy_cache_file = os.path.join(self.db_dir, f"{model_name}_cache.pkl")
-
-        self.embeddings = []
-        self.labels = []
-        self.name_map = {}
-        self.index = None
-        self.faiss_id_to_name = {}
         self.embedding_size = 512
+        
+        # BƯỚC 1 BOOT UP: Khởi tạo IndexIDMap rỗng trên RAM
+        self.index = faiss.IndexIDMap(faiss.IndexFlatIP(self.embedding_size))
 
-        self._build_index()
-
-    def _resolve_cache_file(self):
-        if os.path.exists(self.cache_file):
-            return self.cache_file
-        if os.path.exists(self.legacy_cache_file):
-            return self.legacy_cache_file
-        return None
-
-    def reload_index(self):
-        self._build_index()
-
-    def _build_index(self):
-        self.embeddings = []
-        self.labels = []
-        self.name_map = {}
-        self.faiss_id_to_name = {}
-
-        cache_path = self._resolve_cache_file()
-        if cache_path:
-            print(f"[FAISS] Đang tải cache từ {cache_path}")
-            try:
-                with open(cache_path, "rb") as f:
-                    cache = pickle.load(f)
-                    self.embeddings = cache.get("embeddings", [])
-                    self.labels = cache.get("labels", [])
-                    self.name_map = cache.get("name_map", {})
-            except Exception as e:
-                print(f"[FAISS] Lỗi tải cache, sẽ xây dựng lại: {e}")
-                self._build_from_database()
-        else:
-            print("[FAISS] Không tìm thấy cache, đang xây dựng từ database...")
-            self._build_from_database()
-
-        if not isinstance(self.embeddings, np.ndarray) or self.embeddings.size == 0:
-            print("[FAISS] Database rỗng hoặc bị lỗi. Khởi tạo index rỗng.")
-            self.embeddings = np.empty((0, self.embedding_size), dtype=np.float32)
-            self.labels = np.empty((0,), dtype=np.int32)
-            self.name_map = {}
-        else:
-            self.embeddings = np.asarray(self.embeddings, dtype=np.float32)
-            if self.embeddings.ndim == 1:
-                self.embeddings = self.embeddings.reshape(1, -1)
-            self.embedding_size = int(self.embeddings.shape[1])
-            faiss.normalize_L2(self.embeddings)
-
-            labels_arr = np.asarray(self.labels).reshape(-1) if self.labels is not None else np.array([], dtype=np.int32)
-            if labels_arr.size < len(self.embeddings):
-                pad = np.zeros((len(self.embeddings) - labels_arr.size,), dtype=np.int32)
-                labels_arr = np.hstack([labels_arr.astype(np.int32, copy=False), pad])
-            elif labels_arr.size > len(self.embeddings):
-                labels_arr = labels_arr[:len(self.embeddings)]
-            self.labels = labels_arr.astype(np.int32, copy=False)
-
-        self.index = faiss.IndexFlatIP(self.embedding_size)
-
-        if self.embeddings.shape[0] > 0:
-            self.index.add(self.embeddings)
-            for i in range(len(self.embeddings)):
-                label_idx = int(self.labels[i]) if len(self.labels) > i else 0
-                self.faiss_id_to_name[i] = self.name_map.get(label_idx, "Unknown")
-
-        print(f"[FAISS] Index đã sẵn sàng, đang theo dõi {self.index.ntotal} vector.")
-
-    def _build_from_database(self):
-        person_idx = 0
-        self.embeddings = []
-        self.labels = []
-        self.name_map = {}
-
-        if not os.path.isdir(self.db_dir):
-            print(f"[FAISS] Thư mục database '{self.db_dir}' không tồn tại. Tạo mới.")
-            os.makedirs(self.db_dir, exist_ok=True)
+    def load_from_db(self, vectors, rowids):
+        """Nạp hàng loạt dữ liệu từ SQLite lên RAM lúc khởi động"""
+        if not vectors:
+            print("[FAISS] Database rỗng, chưa có vector nào được nạp.")
             return
-
-        for person_name in sorted(os.listdir(self.db_dir)):
-            person_path = os.path.join(self.db_dir, person_name)
-            if not os.path.isdir(person_path):
-                continue
-
-            print(f"[FAISS] Đang quét ảnh cho: {person_name}")
-            self.name_map[person_idx] = person_name
-
-            person_embeddings = []
-            for file_name in os.listdir(person_path):
-                if not (file_name.endswith(".jpg") or file_name.endswith(".png")):
-                    continue
-
-                img_path = os.path.join(person_path, file_name)
-                img = cv2.imread(img_path)
-                if img is None:
-                    continue
-
-                img_resized = cv2.resize(img, (112, 112))
-                img_rgb = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
-
-                emb = self.recognizer.get_embedding(img_rgb)
-                if emb is not None:
-                    person_embeddings.append(emb[0])
-
-            if person_embeddings:
-                person_embeddings_np = np.array(person_embeddings).astype(np.float32)
-                avg_embedding = np.mean(person_embeddings_np, axis=0, keepdims=False)
-                faiss.normalize_L2(avg_embedding.reshape(1, -1))
-
-                self.embeddings.append(avg_embedding)
-                self.labels.append(person_idx)
-                print(f"[FAISS] Đã tạo 1 vector trung bình cho {person_name} từ {len(person_embeddings)} ảnh.")
-
-            person_idx += 1
-
-        if self.embeddings:
-            self.embeddings = np.array(self.embeddings).astype(np.float32)
-            self.labels = np.array(self.labels, dtype=np.int32)
-            self._save_cache()
-        else:
-            print("[FAISS] Không tìm thấy ảnh nào trong database.")
-
-    def _save_cache(self):
-        try:
-            os.makedirs(self.db_dir, exist_ok=True)
-            with open(self.cache_file, "wb") as f:
-                pickle.dump(
-                    {
-                        "embeddings": self.embeddings,
-                        "labels": self.labels,
-                        "name_map": self.name_map,
-                    },
-                    f,
-                )
-            print(f"[FAISS] Đã lưu cache vào {self.cache_file}")
-        except Exception as e:
-            print(f"[FAISS] Lỗi khi lưu cache: {e}")
+            
+        vec_np = np.array(vectors).astype(np.float32)
+        id_np = np.array(rowids).astype(np.int64) # FAISS ID bắt buộc là int64
+        
+        if vec_np.ndim == 1:
+            vec_np = vec_np.reshape(1, -1)
+            
+        faiss.normalize_L2(vec_np)
+        self.index.add_with_ids(vec_np, id_np)
+        print(f"[FAISS] Đã nạp thành công {self.index.ntotal} vector vào RAM.")
 
     def search(self, query_emb, topk=1):
+        """Tìm kiếm trả về thẳng rowid"""
         if self.index is None or self.index.ntotal == 0:
             return []
-        try:
-            query = np.asarray(query_emb, dtype=np.float32)
-            if query.ndim == 1:
-                query = np.expand_dims(query, axis=0)
-            faiss.normalize_L2(query)
+            
+        query = np.asarray(query_emb, dtype=np.float32)
+        if query.ndim == 1:
+            query = np.expand_dims(query, axis=0)
+        faiss.normalize_L2(query)
 
-            D, I = self.index.search(query, int(max(1, topk)))
-            results = []
-            for idx, score in zip(I[0], D[0]):
-                if idx == -1:
-                    continue
-                name = self.faiss_id_to_name.get(int(idx), "Unknown")
-                results.append((name, float(score)))
-            return results
-        except Exception as e:
-            print(f"[FAISS] Lỗi khi tìm kiếm: {e}")
-            return []
+        # BƯỚC 2 LOGIN: Yêu cầu FAISS search
+        D, I = self.index.search(query, int(max(1, topk)))
+        results = []
+        for idx, score in zip(I[0], D[0]):
+            if idx != -1:  # -1 nghĩa là không tìm thấy
+                results.append((int(idx), float(score))) # Trả về (rowid, score)
+        return results
 
-    def add_embedding(self, new_embs, person_name):
-        vectors = np.asarray(new_embs, dtype=np.float32)
-        if vectors.ndim == 1:
-            vectors = np.expand_dims(vectors, axis=0)
-
-        if vectors.size == 0:
-            return
-
-        if self.index is None:
-            self.index = faiss.IndexFlatIP(self.embedding_size)
-
-        if vectors.shape[1] != self.embedding_size:
-            if self.index is not None and self.index.ntotal == 0:
-                self.embedding_size = int(vectors.shape[1])
-                self.index = faiss.IndexFlatIP(self.embedding_size)
-                self.embeddings = np.empty((0, self.embedding_size), dtype=np.float32)
-                self.labels = np.empty((0,), dtype=np.int32)
-            else:
-                print("[FAISS] Lỗi: kích thước embedding không khớp index hiện tại.")
-                return
-
-        faiss.normalize_L2(vectors)
-
-        if person_name in self.name_map.values():
-            new_label = [k for k, v in self.name_map.items() if v == person_name][0]
-            print(f"[FAISS] {person_name} đã tồn tại, dùng lại label {new_label}.")
-        else:
-            new_label = len(self.name_map)
-            self.name_map[new_label] = person_name
-            print(f"[FAISS] Tạo label mới {new_label} cho {person_name}.")
-
-        start_id = self.index.ntotal
-        self.index.add(vectors)
-
-        if not isinstance(self.embeddings, np.ndarray) or self.embeddings.size == 0:
-            self.embeddings = np.empty((0, self.embedding_size), dtype=np.float32)
-        if not isinstance(self.labels, np.ndarray) or self.labels.size == 0:
-            self.labels = np.empty((0,), dtype=np.int32)
-
-        self.embeddings = np.vstack([self.embeddings, vectors])
-        new_labels_arr = np.array([new_label] * len(vectors), dtype=np.int32)
-        self.labels = np.hstack([self.labels, new_labels_arr])
-
-        for i in range(len(vectors)):
-            self.faiss_id_to_name[start_id + i] = person_name
-
-        print(f"[FAISS] Đã thêm {len(vectors)} vector trung bình cho {person_name}.")
-        self._save_cache()
+    def add_embedding(self, vector, rowid):
+        """Bắn vector mới trực tiếp lên RAM (Register)"""
+        vec_np = np.asarray(vector, dtype=np.float32)
+        if vec_np.ndim == 1:
+            vec_np = np.expand_dims(vec_np, axis=0)
+            
+        faiss.normalize_L2(vec_np)
+        id_np = np.array([rowid], dtype=np.int64)
+        
+        # BƯỚC 4 REGISTER: Map vector và rowid vào FAISS
+        self.index.add_with_ids(vec_np, id_np)
+        print(f"[FAISS] Đã cập nhật vector cho rowid={rowid} lên RAM tức thì.")
 
 
 class MediaPipeFaceDetector:
