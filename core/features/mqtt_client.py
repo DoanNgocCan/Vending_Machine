@@ -60,6 +60,7 @@ class MQTTClientManager:
         # Callback được gọi với (item_name, price, quantity) khi nhận hot update
         self._product_update_callback = None
         self._sync_timer = None
+        self._face_sync_timer = None
         self._face_handler = None
 
     def setup(self, db_manager, api_manager,
@@ -246,58 +247,22 @@ class MQTTClientManager:
         self._sync_timer.start()
 
     def _handle_face_sync(self, payload):
-        """Xử lý In-Memory: Lưu DB (Thẻ SD) -> Nạp FAISS (RAM) khi có khách mới từ Server"""
-        user_id = payload.get("user_id")
-        name = payload.get("name", "")
-        phone = payload.get("phone", "")
-        email = payload.get("email", "")
-        points = payload.get("points", 0)
-        face_vector_b64 = payload.get("face_vector")
-
-        if not user_id or not face_vector_b64:
-            logging.warning("MQTT: Payload face_sync thiếu thông tin quan trọng.")
-            return
-
-        try:
-            # 1. Giải mã Base64 thành Bytes thô (Numpy bytes từ tobytes của máy gửi)
-            raw_bytes = base64.b64decode(face_vector_b64)
+        """Xử lý tín hiệu 'Chuông báo' có khuôn mặt mới từ MQTT"""
+        logging.info("🔔 [MQTT] Nhận tín hiệu có khách hàng đăng ký mới! Chuẩn bị Delta Sync HTTP...")
+        
+        # Hủy luồng cũ nếu có tín hiệu mới tới liên tục
+        if self._face_sync_timer is not None:
+            self._face_sync_timer.cancel()
             
-            # 2. Khôi phục lại Numpy Array (Kích thước 512 chuẩn kiểu float32)
-            face_vector_np = np.frombuffer(raw_bytes, dtype=np.float32)
-            
-            # 3. Đóng gói thành Pickle BLOB để lưu SQLite (Giúp luồng Boot Up đọc được)
-            face_vector_blob = pickle.dumps(face_vector_np)
-
-            # 4. Lưu xuống SQLite (Master Storage)
+        def pull_faces():
             if self._db_manager:
-                self._db_manager.save_customer_with_face_data(
-                    user_id=user_id,
-                    name=name,
-                    phone=phone,
-                    email=email,
-                    password="", 
-                    points=points,
-                    face_vector=face_vector_blob, # <--- LƯU BLOB ĐÃ NÉN BẰNG PICKLE
-                    images_zip=None 
-                )
-                self._db_manager.update_sync_status(user_id, is_synced=1)
+                self._db_manager.pull_faces_from_server(self._face_handler)
+            else:
+                logging.warning("MQTT: Không có db_manager để xử lý Pull HTTP.")
                 
-                # 5. Nạp ngay vào FAISS (In-Memory RAM)
-                if self._face_handler and hasattr(self._face_handler, 'searcher'):
-                    rowid = self._db_manager.get_rowid_by_user_id(user_id)
-                    if rowid:
-                        # Đẩy thẳng Numpy Array vào RAM
-                        self._face_handler.searcher.add_embedding(face_vector_np, rowid)
-                        self._face_handler._update_cache_state()
-                        print(f"🎉 [MQTT] Máy khách đã nạp vector của '{name}' (rowid={rowid}) lên RAM thành công! Có thể đăng nhập tức thì.")
-                    else:
-                        logging.error(f"MQTT: Không tìm thấy rowid cho user {user_id} sau khi lưu DB.")
-                else:
-                    logging.warning("MQTT: Không có FaceRecognitionHandler để nạp vector lên RAM.")
-                    
-        except Exception as e:
-            # Xóa bỏ tham số exc_info=True để tránh lỗi TypeError logger
-            logging.error(f"MQTT: Lỗi trong quá trình xử lý Face Sync: {e}")
+        # Gom cụm trong 2 giây. Nếu có 10 lệnh ping trong 2s, cũng chỉ gọi API 1 lần
+        self._face_sync_timer = threading.Timer(2.0, pull_faces)
+        self._face_sync_timer.start()
 
     # ------------------------------------------------------------------
     # Thuộc tính trạng thái

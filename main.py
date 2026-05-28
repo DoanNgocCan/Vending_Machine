@@ -68,9 +68,14 @@ def main():
         #    Đảm bảo UI bắt đầu với dữ liệu sản phẩm mới nhất từ server.
         print("[MAIN] Chạy đồng bộ dữ liệu ban đầu...")
         sync_manager.sync_now()
+        print("[MAIN] Kéo bù đắp dữ liệu khuôn mặt (Delta Sync) nếu bị lỡ lúc offline...")
+        # Ở đây ta không cần truyền face_handler, vì Hệ thống AI (UI) chưa bật.
+        # Lưu thẳng vào SQLite, lát nữa AI bật lên sẽ tự quét SQLite lên RAM.
+        db_manager.pull_faces_from_server() 
+        
         print("[MAIN] Đồng bộ ban đầu hoàn tất.")
 
-        # 5. Khởi tạo UI Manager
+        # 4. Khởi tạo UI Manager
         #    AdvancedUIManager sẽ tự động khởi tạo thư viện FaceRecognitionSystem bên trong nó.
         #    Đây là điểm duy nhất mà logic AI/Camera được kích hoạt.
         print("[MAIN] Đang khởi tạo giao diện người dùng và hệ thống AI/Camera...")
@@ -80,7 +85,7 @@ def main():
             api_manager_instance=api_manager
         )
 
-        # 6. Khởi động các luồng nền hỗ trợ
+        # 5. Khởi động các luồng nền hỗ trợ
         print("[MAIN] Đang khởi động các dịch vụ nền...")
         
         # Khởi động server thanh toán Flask
@@ -93,7 +98,7 @@ def main():
         # Bắt đầu luồng lắng nghe tín hiệu thanh toán từ Flask
         check_payment_queue(root, ui_instance, shopping_logic, flask_to_tkinter_queue)
 
-        # 7. Chạy vòng lặp chính của giao diện Tkinter
+        # 6. Chạy vòng lặp chính của giao diện Tkinter
         print("[MAIN] Khởi tạo hoàn tất. Bắt đầu vòng lặp chính của ứng dụng.")
         root.mainloop()
 

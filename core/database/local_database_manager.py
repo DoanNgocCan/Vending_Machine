@@ -13,6 +13,9 @@ import requests
 import time
 import ast
 from core.features.api_manager import DEVICE_ID, API_HEADERS, SERVER_URL
+import base64
+import pickle
+import numpy as np
 
 # 1. Lấy đường dẫn thư mục hiện tại (thư mục 'database')
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -106,6 +109,15 @@ class LocalDatabaseManager:
                         is_synced INTEGER DEFAULT 0
                     )
                 """)
+
+                # Bảng lưu cấu hình hệ thống (như thời gian đồng bộ cuối cùng)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS system_config (
+                        key TEXT PRIMARY KEY,
+                        value TEXT
+                    )
+                """)
+
                 con.commit()
             logging.info("DB Local khởi tạo thành công.")
 
@@ -697,7 +709,7 @@ class LocalDatabaseManager:
         try:
             with self._get_connection() as con:
                 sql = """
-                    INSERT INTO customers 
+                    INSERT OR REPLACE INTO customers 
                     (user_id, full_name, phone_number, email, password, points, face_vector, offline_images_zip, is_synced, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
                     ON CONFLICT(user_id) DO UPDATE SET
@@ -795,5 +807,86 @@ class LocalDatabaseManager:
                 return dict(row) if row else None
         except sqlite3.Error:
             return None
+        
+    # === HỆ THỐNG ĐỒNG BỘ DELTA SYNC ===
+    def get_config(self, key, default_value=None):
+        try:
+            with self._get_connection() as con:
+                row = con.execute("SELECT value FROM system_config WHERE key = ?", (key,)).fetchone()
+                return row['value'] if row else default_value
+        except sqlite3.Error:
+            return default_value
+
+    def set_config(self, key, value):
+        try:
+            with self._get_connection() as con:
+                con.execute("INSERT OR REPLACE INTO system_config (key, value) VALUES (?, ?)", (key, value))
+        except sqlite3.Error as e:
+            logging.error(f"Lỗi lưu config {key}: {e}")
+
+    def pull_faces_from_server(self, face_handler=None):
+        """Kéo dữ liệu khuôn mặt mới từ Server (Delta Sync)"""
+        try:
+            since = self.get_config('last_face_sync_time', '2000-01-01T00:00:00')
+            url = f"{SERVER_URL}/api/users/sync"
+            logging.info(f"[SYNC] Đang kéo khuôn mặt mới từ server từ mốc {since}...")
+            
+            response = requests.get(url, params={"since": since}, headers=API_HEADERS, timeout=15)
+            if response.status_code == 200:
+                data = response.json()
+                users = data.get('users', [])
+                synced_at = data.get('synced_at')
+                
+                if not users:
+                    logging.info("[SYNC] Không có khuôn mặt nào mới để đồng bộ.")
+                    return
+                
+                has_changes = False
+                latest_update = since # Khởi tạo bằng mốc cũ nhất vừa truyền lên
+
+                for u in users:
+                    user_id = u.get('user_id')
+                    face_b64 = u.get('face_vector')
+                    user_updated_at = u.get('updated_at') # Lấy từ API Server
+                    
+                    if face_b64:
+                        try:
+                            # Giải mã luồng: Base64 -> Raw numpy bytes -> Numpy Array -> Pickle Blob
+                            raw_bytes = base64.b64decode(face_b64)
+                            face_vector_np = np.frombuffer(raw_bytes, dtype=np.float32)
+                            face_vector_blob = pickle.dumps(face_vector_np)
+                            
+                            self.save_customer_with_face_data(
+                                user_id=user_id,
+                                name=u.get('name', ''),
+                                phone=u.get('phone', ''),
+                                email=u.get('email', ''),
+                                password=u.get('password', ''),
+                                points=u.get('points', 0),
+                                face_vector=face_vector_blob,
+                                images_zip=None
+                            )
+                            has_changes = True
+                            
+                            # CẬP NHẬT MỐC THỜI GIAN LỚN NHẤT
+                            if user_updated_at and user_updated_at > latest_update:
+                                latest_update = user_updated_at
+                                
+                            logging.info(f"[SYNC] Đã nạp thành công khách hàng {u.get('name')} vào SQLite.")
+                        except Exception as e:
+                            logging.error(f"Lỗi parse vector cho {user_id}: {e}")
+                            
+                # LƯU MỐC THỜI GIAN THEO DATA THỰC TẾ ĐÃ LƯU
+                if has_changes:
+                    self.set_config('last_face_sync_time', latest_update)
+                    
+                    # Nạp lại RAM (FAISS) nếu có dữ liệu thay đổi
+                    if face_handler:
+                        logging.info("🔄 [FAISS] Đang làm mới In-Memory RAM để nhận diện khách mới...")
+                        face_handler.reload_cache()
+            else:
+                logging.error(f"[SYNC] Lỗi HTTP {response.status_code} khi gọi API Delta Sync.")
+        except Exception as e:
+            logging.error(f"[SYNC] Lỗi khi kéo dữ liệu khuôn mặt: {e}")
         
 db_manager = LocalDatabaseManager()
