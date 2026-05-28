@@ -7,8 +7,10 @@ from config import DEVICE_ID, SERVER_URL
 
 API_HEADERS = {
     'Content-Type': 'application/json',
-    'X-Device-ID': DEVICE_ID  # Lấy trực tiếp từ config
+    'X-Device-ID': DEVICE_ID,
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' # Thêm dòng này để bypass Cloudflare
 }
+print(f"DEBUG HEADER: {API_HEADERS}")
 
 class VendingAPIManager:
     def get_all_products(self):
@@ -105,7 +107,22 @@ class VendingAPIManager:
             return None
         except requests.RequestException:
             return None
+    def ping_server_to_register(self):
+        """Chủ động gọi Server 1 lần đầu tiên để Server ghi nhớ X-Device-ID."""
+        endpoint = f"{SERVER_URL}/"  # Gọi vào route '/' mặc định của Server
         
+        try:
+            # Gửi request kèm Header chứa tên máy
+            response = requests.get(endpoint, headers=API_HEADERS, timeout=10)
+            
+            if response.status_code == 200:
+                print(f"[INIT] Server đã bắt tay và ghi nhận máy thành công!")
+            else:
+                print(f"[INIT] Lỗi Server trả về: {response.status_code}")
+        except Exception as e:
+            print(f"[INIT] Lỗi kết nối mạng: {e}")
+            
+        print("="*50 + "\n")    
     def register_customer(self, full_name, phone_number, email, password, confirm_password, user_id):
         endpoint = f"{SERVER_URL}/api/user/register"
         payload = {

@@ -56,6 +56,7 @@ def main():
         print("[SYSTEM] Đã kích hoạt phím tắt khẩn cấp: Ctrl + Esc")
         shopping_logic = ShoppingLogic()
         api_manager = VendingAPIManager()
+        api_manager.ping_server_to_register()
         flask_to_tkinter_queue = queue.Queue()
         set_shared_queue(flask_to_tkinter_queue)
 

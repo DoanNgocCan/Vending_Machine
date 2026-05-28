@@ -438,7 +438,15 @@ class AdvancedUIManager:
             self.hide_keyboard_timer = None
         the_entry = event.widget
         self._show_keyboard()
-        self.root.after(10, lambda: the_entry.focus_force())
+        # Thực hiện focus một cách an toàn: kiểm tra xem widget còn tồn tại trước khi gọi focus_force
+        def _safe_focus(widget):
+            try:
+                if widget and getattr(widget, 'winfo_exists', lambda: False)():
+                    widget.focus_force()
+            except Exception:
+                pass
+
+        self.root.after(10, lambda w=the_entry: _safe_focus(w))
     
     def _handle_background_click(self, event):
         try:
@@ -529,11 +537,12 @@ class AdvancedUIManager:
             return
         if self.selected_button and self.selected_button.winfo_exists():
             try:
-                self.selected_button.configure(fg_color="#ffffff", border_color="#cccccc", border_width=1.5)
+                # Trả về trạng thái không chọn: nền trắng và viền xanh dương
+                self.selected_button.configure(fg_color="#ffffff", border_color="#014b91", border_width=3)
             except: pass
         if button and button.winfo_exists():
             try:
-                button.configure(fg_color="#d4edda", border_color="#28a745", border_width=1.5)
+                button.configure(fg_color="#d4edda", border_color="#28a745", border_width=3)
                 self.selected_button = button
             except: pass
             
@@ -575,7 +584,7 @@ class AdvancedUIManager:
     def _deselect_product(self):
         if self.selected_button and self.selected_button.winfo_exists():
             try:
-                self.selected_button.configure(fg_color="#ffffff", border_color="#cccccc", border_width=1.5)
+                self.selected_button.configure(fg_color="#ffffff", border_color="#014b91", border_width=3)
             except: pass
         self.selected_button = None
         self.selected_product = None
@@ -695,6 +704,11 @@ class AdvancedUIManager:
              cart_display.insert(tk.END, "Giỏ hàng trống\n", "center")
         else:
             total_price = 0
+            
+            # Cấu hình một tag định dạng mới cho riêng dòng Tổng cộng
+            # (Phóng to font lên 26, in đậm và tô màu đỏ #dc3545)
+            cart_display.tag_configure("total_highlight", font=("Arial", 26, "bold"), foreground="#014b91")
+            
             # Duyệt qua từng item (dạng Dict)
             for item in items_in_cart:
                 name = item['name']
@@ -703,11 +717,13 @@ class AdvancedUIManager:
                 total = item['total']
                 total_price += total
                 
-                # Hiển thị chi tiết: Tên: SL x Giá
+                # Hiển thị chi tiết: Tên: SL x Giá (Giữ nguyên định dạng thường)
                 cart_display.insert(tk.END, f"{name}: {quantity} x {int(price):,}đ\n")
             
             cart_display.insert(tk.END, "--------------------\n")
-            cart_display.insert(tk.END, f"Tổng cộng: {int(total_price):,}đ")
+            
+            # Gắn tag "total_highlight" vào dòng hiển thị tổng tiền
+            cart_display.insert(tk.END, f"Tổng cộng: {int(total_price):,}đ", "total_highlight")
         
         cart_display.config(state=tk.DISABLED)
 

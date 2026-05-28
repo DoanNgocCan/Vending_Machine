@@ -57,9 +57,6 @@ class MainView:
         # [RIGHT] Khởi tạo Frame điều khiển (Giỏ hàng, Nút bấm...)
         self._init_control_panel()
 
-        # --- 3. VẼ LƯỚI SẢN PHẨM LẦN ĐẦU ---
-        #self.refresh_product_grid()
-
     def _init_control_panel(self):
         """Khởi tạo cột bên phải (Giỏ hàng, Nút bấm, Đăng nhập...)"""
         control_width = 600
@@ -100,8 +97,8 @@ class MainView:
         self.status_frame = tk.Frame(self.control_frame, bg="lightgray")
         self.status_frame.pack(pady=(10,5), fill=tk.X)
         tk.Label(self.status_frame, textvariable=self.controller.status_message_var,
-                 font=("Arial", control_fonts["status"], "bold"), fg="blue", bg="lightgray", 
-                 wraplength=control_width-20, height=2).pack()
+             font=("Arial", control_fonts["status"], "bold"), fg="#014b91", bg="lightgray", 
+             wraplength=control_width-20, height=2).pack()
 
         # --- C. Điều chỉnh số lượng ---
         quantity_frame = tk.Frame(self.control_frame, bg="lightgray")
@@ -138,11 +135,17 @@ class MainView:
         control_buttons_frame = tk.Frame(self.control_frame, bg="lightgray")
         control_buttons_frame.pack(pady=5, fill=tk.X)
         
-        tk.Button(control_buttons_frame, text="RESET", font=("Arial", 14, "bold"), bg="blue", fg="white", 
-                  command=self.controller.on_clear_cart_handler).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        # Nút RESET đã được bo góc và có hiệu ứng hover
+        ctk.CTkButton(control_buttons_frame, text="RESET", font=("Arial", 16, "bold"), 
+                      fg_color="#014b91", hover_color="#00346F", text_color="white", 
+                      height=50, corner_radius=12,
+                      command=self.controller.on_clear_cart_handler).pack(side=tk.LEFT, padx=(10, 5), fill=tk.X, expand=True)
         
-        tk.Button(control_buttons_frame, text="THOÁT", font=("Arial", 14, "bold"), bg="black", fg="white", 
-                  command=self.controller.return_to_welcome).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        # Nút THOÁT đã được bo góc và có hiệu ứng hover
+        ctk.CTkButton(control_buttons_frame, text="THOÁT", font=("Arial", 16, "bold"), 
+                      fg_color="#333333", hover_color="#1a1a1a", text_color="white", 
+                      height=50, corner_radius=12,
+                      command=self.controller.return_to_welcome).pack(side=tk.LEFT, padx=(5, 10), fill=tk.X, expand=True)
 
         # --- F. Hiển thị Giỏ hàng ---
         # 1. Khởi tạo khung chứa tổng (Dòng này bị thiếu gây ra lỗi)
@@ -285,6 +288,9 @@ class MainView:
             pass # Nếu lỗi tải ảnh, photo_img vẫn là None
 
         # 3. TẠO NÚT BẤM VÀ TRUYỀN ẢNH VÀO NGAY LÚC KHỞI TẠO
+        # Chọn màu viền mặc định: xanh dương giống nút đăng nhập cho sản phẩm có thể chọn, giữ màu xám cho hết hàng
+        default_border_color = "#014b91" if not is_out_of_stock else "#cccccc"
+
         item_frame = ctk.CTkButton(
             self.product_display_frame, 
             text=display_text if photo_img else f"[No Img]\n{display_text}",
@@ -297,8 +303,8 @@ class MainView:
             state=btn_state,
             compound="top",
             corner_radius=15,
-            border_width=1.5,
-            border_color="#cccccc"
+            border_width=3,
+            border_color=default_border_color
         )
 
         if not is_out_of_stock:
@@ -543,12 +549,11 @@ class MainView:
         self.recommendation_overlay.place(relx=0.5, rely=0.5, anchor="center")
         self.recommendation_overlay.pack_propagate(False)
 
-        # Đã thêm wraplength=popup_w - 60 để chữ tự động xuống dòng
+
         tk.Label(self.recommendation_overlay, text=final_greeting, 
                  font=("Arial", 24, "bold"), bg="#014b91", fg="white", 
                  wraplength=popup_w - 60).pack(pady=(30, 5))
         
-        # Chỉnh lại wraplength đồng bộ với khung
         tk.Label(self.recommendation_overlay, text=final_suggest, 
                  font=("Arial", 14, "italic"), bg="#014b91", fg="#e0e0e0", 
                  wraplength=popup_w - 60).pack(pady=(0, 15))
