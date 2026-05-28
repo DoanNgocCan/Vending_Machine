@@ -19,6 +19,7 @@ import ssl
 import base64
 import os
 import pickle
+import numpy as np
 
 try:
     import paho.mqtt.client as mqtt
@@ -181,7 +182,7 @@ class MQTTClientManager:
         except json.JSONDecodeError as e:
             logging.error(f"MQTT: Lỗi giải mã JSON: {e} | raw={msg.payload}")
         except Exception as e:
-            logging.error(f"MQTT: Lỗi xử lý tin nhắn: {e}", exc_info=True)
+            logging.error(f"MQTT: Lỗi xử lý tin nhắn: {e}")
 
     # ------------------------------------------------------------------
     # Xử lý từng loại tin nhắn
@@ -258,37 +259,36 @@ class MQTTClientManager:
             return
 
         try:
-            # 1. Giải mã Base64 thành Bytes (BLOB)
-            face_vector_binary = base64.b64decode(face_vector_b64)
+            # 1. Giải mã Base64 thành Bytes thô (Numpy bytes từ tobytes của máy gửi)
+            raw_bytes = base64.b64decode(face_vector_b64)
+            
+            # 2. Khôi phục lại Numpy Array (Kích thước 512 chuẩn kiểu float32)
+            face_vector_np = np.frombuffer(raw_bytes, dtype=np.float32)
+            
+            # 3. Đóng gói thành Pickle BLOB để lưu SQLite (Giúp luồng Boot Up đọc được)
+            face_vector_blob = pickle.dumps(face_vector_np)
 
-            # 2. Lưu xuống SQLite (Master Storage)
+            # 4. Lưu xuống SQLite (Master Storage)
             if self._db_manager:
                 self._db_manager.save_customer_with_face_data(
                     user_id=user_id,
                     name=name,
                     phone=phone,
                     email=email,
-                    password="", # Thường mật khẩu không broadcast qua MQTT, cứ để trống
+                    password="", 
                     points=points,
-                    face_vector=face_vector_binary,
+                    face_vector=face_vector_blob, # <--- LƯU BLOB ĐÃ NÉN BẰNG PICKLE
                     images_zip=None 
                 )
-                # Đánh dấu đã đồng bộ để khỏi bị background_sync đẩy ngược lên lại
                 self._db_manager.update_sync_status(user_id, is_synced=1)
                 
-                # 3. Nạp ngay vào FAISS (In-Memory RAM)
+                # 5. Nạp ngay vào FAISS (In-Memory RAM)
                 if self._face_handler and hasattr(self._face_handler, 'searcher'):
-                    # Lấy rowid vừa được sinh ra trong SQLite
                     rowid = self._db_manager.get_rowid_by_user_id(user_id)
-                    
                     if rowid:
-                        # Chuyển BLOB thành Numpy Array cho FAISS
-                        face_vector_np = pickle.loads(face_vector_binary)
-                        
-                        # Đẩy thẳng vào RAM
+                        # Đẩy thẳng Numpy Array vào RAM
                         self._face_handler.searcher.add_embedding(face_vector_np, rowid)
                         self._face_handler._update_cache_state()
-                        
                         print(f"🎉 [MQTT] Máy khách đã nạp vector của '{name}' (rowid={rowid}) lên RAM thành công! Có thể đăng nhập tức thì.")
                     else:
                         logging.error(f"MQTT: Không tìm thấy rowid cho user {user_id} sau khi lưu DB.")
@@ -296,7 +296,8 @@ class MQTTClientManager:
                     logging.warning("MQTT: Không có FaceRecognitionHandler để nạp vector lên RAM.")
                     
         except Exception as e:
-            logging.error(f"MQTT: Lỗi trong quá trình xử lý Face Sync: {e}", exc_info=True)
+            # Xóa bỏ tham số exc_info=True để tránh lỗi TypeError logger
+            logging.error(f"MQTT: Lỗi trong quá trình xử lý Face Sync: {e}")
 
     # ------------------------------------------------------------------
     # Thuộc tính trạng thái

@@ -78,8 +78,6 @@ def main():
             shopping_logic_instance=shopping_logic,
             api_manager_instance=api_manager
         )
-        # Gán ui_instance vào container để các MQTT callback có thể truy cập
-        ui_ref[0] = ui_instance
 
         # 6. Khởi động các luồng nền hỗ trợ
         print("[MAIN] Đang khởi động các dịch vụ nền...")

@@ -145,7 +145,7 @@ class RegisterScreen(tk.Toplevel):
         print("[REGISTER_UI] Dữ liệu hợp lệ. Đang đăng ký vào DB local...")
         
         # Truyền email vào db_manager (đã sửa ở bước trước)
-        result = self.controller.db_manager.register_customer(name, phone, email, password, face_encoding=None)
+        result = self.controller.db_manager.register_customer(name, phone, email, password, face_vector=None)
         
         if "error" in result:
             if result["error"] == "duplicate_phone_or_email":
