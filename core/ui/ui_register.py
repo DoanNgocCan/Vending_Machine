@@ -67,7 +67,7 @@ class RegisterScreen(tk.Toplevel):
         confirm_password_label = ctk.CTkLabel(form_frame, text="Xác nhận mật khẩu", font=("Arial", 16), text_color="black")
         confirm_password_label.pack(anchor="w", padx=5)
         self.confirm_password_entry = ctk.CTkEntry(form_frame, font=("Arial", 18), height=48, corner_radius=15, border_width=2, border_color="#014b91", fg_color="white", text_color="black", placeholder_text="Nhập lại mật khẩu", placeholder_text_color="gray", show="*")
-        self.confirm_password_entry.pack(fill="x", pady=(5, 15))
+        self.confirm_password_entry.pack(fill="x", pady=(5, 10))
 
         # Cập nhật danh sách input_widgets
         self.input_widgets = [self.name_entry, self.phone_entry, self.email_entry, self.password_entry, self.confirm_password_entry]
@@ -80,9 +80,25 @@ class RegisterScreen(tk.Toplevel):
         for widget in background_widgets:
             widget.bind("<Button-1>", self.controller._handle_background_click)
 
+        # --- BỔ SUNG CHECKBOX ĐỒNG Ý CUNG CẤP KHUÔN MẶT ---
+        self.consent_var = tk.BooleanVar(value=False)
+        self.consent_checkbox = ctk.CTkCheckBox(
+            content_frame, 
+            text="  Bằng việc đánh dấu vào ô này, tôi đồng ý cung cấp dữ liệu sinh trắc học \n  khuôn mặt để trải nghiệm tính năng nhận diện và mua hàng nhanh.",
+            variable=self.consent_var,
+            font=("Arial", 18), 
+            text_color="#333333",
+            fg_color="#014b91",
+            hover_color="#00346F",
+            border_color="#014b91",
+            corner_radius=4
+        )
+        # Đặt checkbox căn trái, canh lề cho khớp với form
+        self.consent_checkbox.pack(pady=(5, 5), padx=80, anchor="w")
+
         self.message_var = tk.StringVar(value="")
         message_label = ctk.CTkLabel(content_frame, textvariable=self.message_var, font=("Arial", 16), text_color="red", fg_color="white")
-        message_label.pack(pady=(0, 10))
+        message_label.pack(pady=(0, 5))
 
         btn_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
         btn_frame.pack(side="bottom", pady=(0, 30), fill="x", padx=60)
@@ -140,6 +156,11 @@ class RegisterScreen(tk.Toplevel):
         if password != confirm_password:
             self.message_var.set("Mật khẩu xác nhận không khớp.")
             self.confirm_password_entry.focus()
+            return
+        
+        # --- BỔ SUNG KIỂM TRA CHECKBOX ĐỒNG Ý ---
+        if not self.consent_var.get():
+            self.message_var.set("Vui lòng đồng ý cung cấp dữ liệu khuôn mặt để tiếp tục.")
             return
         
         print("[REGISTER_UI] Dữ liệu hợp lệ. Đang đăng ký vào DB local...")

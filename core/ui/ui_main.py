@@ -8,6 +8,8 @@ import requests
 import threading
 import random
 from datetime import datetime
+# Import module xử lý lời chào vừa tạo
+from core.ui.ui_main_ads import generate_recommendation_messages
 
 # --- CẤU HÌNH ĐƯỜNG DẪN (Để import được config) ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -447,84 +449,14 @@ class MainView:
         recommended_name = product['name']
         recommended_price = product['price']
         
-        # --- PHÂN LOẠI SẢN PHẨM THÔNG MINH ---
-        lower_name = recommended_name.lower()
-        
-        # Nhóm đồ uống
-        if any(kw in lower_name for kw in ['nước', 'trà', 'cà phê', 'coffee', 'coca', 'pepsi', 'sting', 'bò húc', 'sữa']):
-            don_vi = random.choice(["lon", "chai"])
-            hanh_dong = random.choice(["giải khát", "uống", "làm ngụm"])
-            tinh_tu = random.choice(["mát lạnh", "sảng khoái"])
-            
-        # Nhóm đồ ăn vặt / Snack
-        elif any(kw in lower_name for kw in ['snack', 'bánh', 'kẹo', 'khoai tây', 'oreo', 'chocopie', 'đậu phộng']):
-            don_vi = random.choice(["gói", "hộp", "chiếc"])
-            hanh_dong = random.choice(["nhâm nhi", "lót dạ", "ăn vặt"])
-            tinh_tu = random.choice(["giòn rụm", "ngon nghẻ"])
-            
-        # Fallback (Mặc định cho các món không rõ phân loại)
-        else:
-            don_vi = "phần"
-            hanh_dong = "thưởng thức"
-            tinh_tu = "tuyệt vời"
-
-        # --- LOGIC CÁ NHÂN HÓA LỜI CHÀO THEO THỜI GIAN ---
-        hour = datetime.now().hour
-        if 5 <= hour < 11:
-            greetings = [
-                f"Chào buổi sáng rực rỡ, {user_name}! ☀️",
-                f"Nạp năng lượng cho ngày mới thôi, {user_name} ơi!",
-                f"Sáng nay {user_name} đã dùng gì chưa?",
-                f"Khởi đầu ngày mới thật bùng nổ nhé {user_name}!"
-            ]
-        elif 11 <= hour < 14:
-            greetings = [
-                f"Giờ nghỉ trưa đến rồi, thư giãn chút nhé {user_name}! 🍱",
-                f"Làm việc mệt rồi, tự thưởng cho mình chút gì đó đi {user_name}.",
-                f"Trưa rồi, bổ sung năng lượng để chiều làm việc tiếp nào!",
-                f"{user_name} đừng bỏ bữa trưa nhé!"
-            ]
-        elif 14 <= hour < 18:
-            greetings = [
-                f"Vực lại tinh thần buổi chiều nào {user_name}! 💪",
-                f"Chiều rồi, kiếm chút gì {hanh_dong} cho đỡ buồn ngủ nhé!",
-                f"Nghỉ tay vài phút, {hanh_dong} chút gì đó cho thư thả nha.",
-                f"Gần hết ngày làm việc rồi, cố lên {user_name} ơi!"
-            ]
-        else:
-            greetings = [
-                f"Tối muộn rồi, {user_name} nhớ nghỉ ngơi sớm nhé! 🌙",
-                f"Vẫn còn thức sao {user_name}? Ghé máy mua đồ là chuẩn bài rồi.",
-                f"Đêm hôm cần {hanh_dong} gì cứ để hệ thống lo nhé!",
-                f"Thư giãn buổi tối thôi {user_name}!"
-            ]
-
-        # --- TẠO CÂU GỢI Ý ĐỘNG ---
-        suggest_texts = [
-            # Các câu mặc định ban đầu
-            f"Hệ thống thấy bạn rất chuộng '{recommended_name}'. Làm ngay một {don_vi} để {hanh_dong} nhé?",
-            f"Món 'ruột' của bạn đây rồi! Quất luôn một {don_vi} '{recommended_name}' {tinh_tu} không?",
-            f"Đã lâu không gặp, bạn có muốn {hanh_dong} lại '{recommended_name}' quen thuộc không?",
-            f"Máy vừa lên kệ '{recommended_name}' dành riêng cho bạn. Thêm 1 {don_vi} vào giỏ chứ?",
-            
-            # Các câu bổ sung thêm
-            f"Trông có vẻ bạn đang cần một {don_vi} '{recommended_name}'. Bấm nút chốt đơn luôn nhé?",
-            f"Đừng quên tự thưởng cho mình một {don_vi} '{recommended_name}' {tinh_tu} nha!",
-            f"Nghĩ đến '{recommended_name}' là thấy hợp lý rồi. Thêm ngay 1 {don_vi} vào giỏ hàng thôi!",
-            f"Gương mặt thân quen lại chọn '{recommended_name}' đúng không? Lấy ngay 1 {don_vi} nào!",
-            f"Hệ thống đoán là bạn đang muốn {hanh_dong} '{recommended_name}'. Chọn luôn cho nóng nhé!",
-            f"Chỉ thiếu một {don_vi} '{recommended_name}' {tinh_tu} nữa là hoàn hảo. Bạn có muốn lấy không?",
-            f"Cơ sở dữ liệu báo rằng bạn rất thích '{recommended_name}'! Ủng hộ máy 1 {don_vi} nhé?",
-            f"Chưa biết chọn gì thì cứ '{recommended_name}' mà tiến thôi. Bấm mua ngay nào!"
-        ]
-
-        final_greeting = random.choice(greetings)
-        final_suggest = random.choice(suggest_texts)
+        # --- LẤY TEXT ĐÃ ĐƯỢC XỬ LÝ TỪ MODULE BÊN NGOÀI ---
+        final_greeting, final_suggest = generate_recommendation_messages(user_name, recommended_name)
         
         # 1. Tìm slot sản phẩm
         try:
             current_stock = self.controller.get_latest_inventory()
-        except AttributeError: current_stock = {}
+        except AttributeError: 
+            current_stock = {}
 
         target_slot = None
         max_stock = 0
@@ -537,7 +469,6 @@ class MainView:
         
         if not target_slot: return
 
-        # [QUAN TRỌNG]: Lưu lại slot đang được đề xuất để hàm cập nhật giá có thể tìm thấy
         self.current_recommended_slot = str(target_slot)
 
         # 2. VẼ GIAO DIỆN
