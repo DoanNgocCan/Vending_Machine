@@ -145,7 +145,7 @@ class MQTTClientManager:
             self._connected = True
             logging.info("MQTT: Kết nối broker thành công!")
             # Đăng ký các topic ngay sau khi kết nối thành công
-            print("✅ [MQTT] Kết nối tới Broker THÀNH CÔNG và bắt đầu lắng nghe!")
+            print("[MQTT] Kết nối tới Broker THÀNH CÔNG và bắt đầu lắng nghe!")
             client.subscribe(MQTT_TOPIC_PRODUCT_UPDATE)
             client.subscribe(MQTT_TOPIC_DATA_CHANGED)
             client.subscribe(MQTT_TOPIC_FACE_SYNC)
@@ -170,8 +170,8 @@ class MQTTClientManager:
             topic = msg.topic
             payload = json.loads(msg.payload.decode("utf-8"))
             logging.info(f"MQTT: Nhận tin nhắn từ topic '{topic}': {payload}")
-            print(f"\n[🚀 MQTT XÁC NHẬN] Nhận lệnh từ Server qua kênh '{topic}'")
-            print(f"   => Dữ liệu: {payload}\n")
+            print(f"\n[MQTT XÁC NHẬN] Nhận lệnh từ Server qua kênh '{topic}'")
+            print(f"   => Dữ liệu: {payload}")
 
             if topic == MQTT_TOPIC_PRODUCT_UPDATE:
                 self._handle_product_update(payload)
@@ -248,7 +248,7 @@ class MQTTClientManager:
 
     def _handle_face_sync(self, payload):
         """Xử lý tín hiệu 'Chuông báo' có khuôn mặt mới từ MQTT"""
-        logging.info("🔔 [MQTT] Nhận tín hiệu có khách hàng đăng ký mới! Chuẩn bị Delta Sync HTTP...")
+        logging.info("[MQTT] Nhận tín hiệu có khách hàng đăng ký mới! Chuẩn bị Delta Sync HTTP...")
         
         # Hủy luồng cũ nếu có tín hiệu mới tới liên tục
         if self._face_sync_timer is not None:

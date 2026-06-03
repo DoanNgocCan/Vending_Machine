@@ -612,10 +612,10 @@ class FaceRecognitionHandler:
             if success:
                 # Trường hợp 1: Đồng bộ thành công trực tiếp lên Server
                 db_manager.update_sync_status(user_id, is_synced=1)
-                print(f"✅ [ASYNC] Đã đồng bộ tài khoản {user_id} lên Server. Thẻ SD an toàn.")
+                print(f"[ASYNC] Đã đồng bộ tài khoản {user_id} lên Server. Thẻ SD an toàn.")
             else:
                 # Trường hợp 2: Lỗi mạng/Mất kết nối -> Kích hoạt cơ chế lưu ảnh Fallback Offline
-                print(f"⚠️ [ASYNC] Không thể kết nối tới Server. Đang lưu ảnh nén ZIP vào SQLite làm dữ liệu dự phòng...")
+                print(f"[ASYNC] Không thể kết nối tới Server. Đang lưu ảnh nén ZIP vào SQLite làm dữ liệu dự phòng...")
                 db_manager.save_customer_with_face_data(
                     user_id=user_id,
                     name=name,
@@ -626,7 +626,7 @@ class FaceRecognitionHandler:
                     face_vector=vector_blob,
                     images_zip=images_zip_bytes
                 )
-                print(f"💾 [FALLBACK] Đã sao lưu dữ liệu hình ảnh offline thành công cho khách {user_id}.")
+                print(f"[FALLBACK] Đã sao lưu dữ liệu hình ảnh offline thành công cho khách {user_id}.")
 
         # Kích hoạt Thread chạy độc lập để tránh làm đóng băng giao diện chính
         threading.Thread(target=background_upload_task, daemon=True).start()

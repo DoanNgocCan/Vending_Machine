@@ -240,7 +240,7 @@ class AdvancedUIManager:
         if recognized_user_id == "Spoofing_Detected":
             print("UI-MAIN: CẢNH BÁO BẢO MẬT - phát hiện cố gắng giả mạo khuôn mặt.")
             self.root.deiconify()
-            self.status_message_var.set("⚠️ Cảnh báo: Phát hiện giả mạo khuôn mặt. Vui lòng thử lại bằng khuôn mặt thật.")
+            self.status_message_var.set("Cảnh báo: Phát hiện giả mạo khuôn mặt. Vui lòng thử lại.")
             try:
                 self.audio_driver.play_spoofing_alert_async()
             except Exception as e:
@@ -569,15 +569,15 @@ class AdvancedUIManager:
         
         if available_stock > 0:
             self.selected_quantity = 1
-            self.status_message_var.set(f"✅ ĐÃ CHỌN: {name} - {price:,}đ (Còn lại: {available_stock})")
+            self.status_message_var.set(f"Đã chọn: {name} - {price:,}đ (Còn lại: {available_stock})")
         else:
             self.selected_quantity = 0
             if real_stock > 0:
                 # Trường hợp kho còn nhưng đã gom hết vào giỏ
-                self.status_message_var.set(f"⚠️ Bạn đã gom toàn bộ {real_stock} {name} vào giỏ!")
+                self.status_message_var.set(f"Bạn đã lấy toàn bộ {real_stock} {name} vào giỏ!")
             else:
                 # Trường hợp kho trống rỗng từ đầu
-                self.status_message_var.set(f"❌ {name} hiện đang hết hàng!")
+                self.status_message_var.set(f"Xin lỗi, {name} hiện đang hết hàng!")
             
         self.quantity_var.set(str(self.selected_quantity))
 
@@ -605,7 +605,7 @@ class AdvancedUIManager:
             self.quantity_var.set(str(self.selected_quantity))
         elif self.selected_quantity >= self.max_available_quantity:
             # Thông báo cho người dùng biết đã max
-            self.status_message_var.set(f"⚠️ Chỉ còn {self.max_available_quantity} sản phẩm trong máy!")
+            self.status_message_var.set(f"Hiện chỉ còn {self.max_available_quantity} sản phẩm trong máy!")
             
             # --- CƠ CHẾ KHÔI PHỤC AN TOÀN ---
             # Lấy tên sản phẩm ra một biến cục bộ để tránh bị mất dữ liệu nếu user hủy chọn
@@ -630,7 +630,7 @@ class AdvancedUIManager:
             self.selected_quantity -= 1
             self.quantity_var.set(str(self.selected_quantity))
         else:
-            self.status_message_var.set("⚠️ Số lượng tối thiểu là 1")
+            self.status_message_var.set("Số lượng tối thiểu là 1")
             
             # --- CƠ CHẾ KHÔI PHỤC AN TOÀN ---
             current_name = self.selected_product[1]
@@ -731,7 +731,7 @@ class AdvancedUIManager:
         """Nút THANH TOÁN"""
         # [SỬA] Kiểm tra self.logic.cart
         if not self.logic.cart:
-            self.status_message_var.set("⚠️ Giỏ hàng trống!")
+            self.status_message_var.set("Giỏ hàng trống!")
             self.root.after(3000, lambda: self.status_message_var.set("Chọn sản phẩm để mua hàng"))
             return
         self._show_confirmation_screen()
@@ -743,7 +743,7 @@ class AdvancedUIManager:
         
         self.update_cart_display_handler()
         self._deselect_product()
-        self.status_message_var.set("✅ Đã xóa giỏ hàng")
+        self.status_message_var.set("Đã xóa giỏ hàng")
         self.root.after(TEMP_MESSAGE_DURATION, lambda: self.status_message_var.set("Chọn sản phẩm để mua hàng"))
     def return_to_welcome(self):
         """
@@ -809,10 +809,10 @@ class AdvancedUIManager:
                 self.selected_quantity = max(1, self.max_available_quantity)
                 
             if self.max_available_quantity > 0:
-                self.status_message_var.set(f"✅ ĐÃ CHỌN: {new_name} - {int(price):,}đ (Còn lại: {self.max_available_quantity})")
+                self.status_message_var.set(f"Đã chọn: {new_name} - {int(price):,}đ (Còn lại: {self.max_available_quantity})")
                 if self.selected_quantity == 0: self.selected_quantity = 1
             else:
-                self.status_message_var.set(f"❌ {new_name} hiện đang hết hàng!")
+                self.status_message_var.set(f"Xin lỗi, {new_name} hiện đang hết hàng!")
                 self.selected_quantity = 0
                 
             self.quantity_var.set(str(self.selected_quantity))
@@ -823,40 +823,42 @@ class AdvancedUIManager:
     def _finalize_and_sync_transaction(self):
         print("UI: Bắt đầu hoàn tất giao dịch...")
         
-        # --- [SỬA] LẤY DỮ LIỆU TỪ self.logic.cart ---
         items_in_cart = self.logic.cart
         if not items_in_cart: return
 
         # Tính tổng tiền trực tiếp từ giỏ
         gross_total_amount = sum(item['total'] for item in items_in_cart)
-        # ---------------------------------------------
         
-        # Xử lý giảm giá (Logic cũ giữ nguyên)
+        # --- CẬP NHẬT LOGIC ĐIỂM ---
         bulk_discount_amount = 2000 if gross_total_amount > 20000 else 0
-        points_redemption_cash_value = self.points_used_in_transaction * 100
+        
+        # Lấy chính xác điểm đã dùng từ ConfirmationScreen (đã lưu vào controller)
+        points_used = self.points_used_in_transaction 
+        points_redemption_cash_value = points_used * 100
+        
         total_discount_value = bulk_discount_amount + points_redemption_cash_value
         
+        # Số tiền thực tế thanh toán (sau giảm giá)
+        final_paid_amount = max(0, gross_total_amount - total_discount_value)
+        # Điểm tích lũy thêm (1000đ = 1 điểm)
+        points_earned = int(final_paid_amount // 1000)
+
         customer_name = self.customer_name or "Khách vãng lai"
         user_id = self.customer_info.get('code') if self.customer_info else None
-        points_used = self.points_used_in_transaction
         
         # Chuẩn bị dữ liệu cho DB Local
         items_detail_parts = []
         items_sold_list_for_local_db = []
         
-        # --- [SỬA] DUYỆT QUA LIST DICT ---
         for item in items_in_cart:
             p_name = item['name']
             p_qty = item['quantity']
-            # p_id = item['id'] # Nếu cần dùng ID
-            
             items_detail_parts.append(f"{p_name} x{p_qty}")
             items_sold_list_for_local_db.append({"product_name": p_name, "quantity": p_qty})
-        # ---------------------------------
             
         items_detail_str = ", ".join(items_detail_parts)
 
-        # Worker Thread (Giữ nguyên logic luồng)
+        # Worker Thread
         def transaction_worker():
             try:
                 # 1. Lưu DB Local
@@ -868,10 +870,16 @@ class AdvancedUIManager:
                 # Cập nhật điểm
                 final_new_points = 0
                 if user_id:
-                    eligible_amount = max(0, gross_total_amount - total_discount_value)
-                    self.db_manager.update_customer_points(user_id, points_used, eligible_amount)
+                    # Truyền số điểm đã dùng và số tiền thực trả để DB xử lý
+                    self.db_manager.update_customer_points(user_id, points_used, final_paid_amount)
+                    
                     user = self.db_manager.get_customer_by_id(user_id)
-                    if user: final_new_points = user['points']
+                    if user: 
+                        final_new_points = user.get('points', 0)
+                        
+                        # [QUAN TRỌNG] Cập nhật lại bộ nhớ RAM để UI không bị sai ở lần mua kế tiếp
+                        if self.customer_info:
+                            self.customer_info['points'] = final_new_points
 
                 # 2. Hardware LED
                 items_slot_list = []
@@ -894,8 +902,16 @@ class AdvancedUIManager:
                 
                 cust_api = None
                 if user_id:
-                    cust_api = {"user_id": user_id, "name": customer_name, "new_total_points": final_new_points}
+                    # Gửi đầy đủ tham số về điểm để API Server đối soát và cập nhật DB Server
+                    cust_api = {
+                        "user_id": user_id, 
+                        "name": customer_name,
+                        "points_used": points_used,
+                        "points_earned": points_earned,
+                        "new_total_points": final_new_points
+                    }
 
+                # Gọi API Server đồng bộ
                 if self.api_manager.report_transaction(gross_total_amount, final_api_items, cust_api):
                     self.db_manager.mark_transaction_as_synced(order_code)
 

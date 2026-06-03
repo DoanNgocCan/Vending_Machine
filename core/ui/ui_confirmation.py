@@ -268,7 +268,7 @@ class ConfirmationScreen(tk.Toplevel):
             return
             
         except Exception as e:
-            self.error_label.configure(text=f"❌ {str(e)}")
+            self.error_label.configure(text=f"{str(e)}")
             self.confirm_btn.configure(state="normal", text="Xác nhận & Thanh toán")
             self.back_btn.configure(state="normal")
 

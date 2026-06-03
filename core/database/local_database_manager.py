@@ -209,7 +209,7 @@ class LocalDatabaseManager:
                     os.remove(cache_path)
 
             print("-" * 60)
-            logging.info(f"✅ SYNC SUCCESS: Đồng bộ hoàn tất cho khách hàng '{name}'.")
+            logging.info(f"SYNC SUCCESS: Đồng bộ hoàn tất cho khách hàng '{name}'.")
             print("-" * 60)
 
         except Exception as e:
@@ -340,13 +340,13 @@ class LocalDatabaseManager:
                         ))
                         count += 1
                     con.commit()
-                logging.info(f"✅ Đã đồng bộ {count} khách hàng từ Server.")
+                logging.info(f"Đã đồng bộ {count} khách hàng từ Server.")
         except Exception as e:
             logging.error(f"Lỗi sync users from server: {e}")
 
     def sync_products_from_server(self):
         get_url = f"{SERVER_URL}/api/products"
-        logging.info(f"🔄 Đang đồng bộ kho từ Server cho máy: {DEVICE_ID}...")
+        logging.info(f"Đang đồng bộ kho từ Server cho máy: {DEVICE_ID}...")
 
         try:
             from core.features.api_manager import api_manager
@@ -432,10 +432,10 @@ class LocalDatabaseManager:
                             cursor.execute("DELETE FROM inventory")
                             
                         con.commit()
-                        logging.info(f"✅ Đã cập nhật {count} ô chứa hàng từ Server.")
+                        logging.info(f"Đã cập nhật {count} ô chứa hàng từ Server.")
                         return True
         except Exception as e:
-            logging.error(f"❌ Lỗi sync_products_from_server: {e}")
+            logging.error(f"Lỗi sync_products_from_server: {e}")
             return False    
     def login_customer(self, login_id, password_input):
         sql = "SELECT * FROM customers WHERE phone_number = ? OR email = ?"
@@ -629,16 +629,6 @@ class LocalDatabaseManager:
             logging.error(f"Lỗi khi đánh dấu đồng bộ đơn hàng {order_code}: {e}")
             return False
 
-    '''
-    def get_unsynced_customers(self):
-        try:
-            with self._get_connection() as con:
-                customers = con.execute("SELECT * FROM customers WHERE is_synced = 0").fetchall()
-                return customers
-        except sqlite3.Error as e:
-            logging.error(f"Lỗi khi lấy danh sách khách hàng chưa đồng bộ: {e}")
-            return []
-    '''
 
     def update_customer_points(self, user_id, points_used, total_amount):
         if not user_id: return False
@@ -701,7 +691,7 @@ class LocalDatabaseManager:
         except sqlite3.Error as e:
             logging.error(f"Lỗi khi đánh dấu unsynced cho user {user_id}: {e}")
             return False
-    def save_customer_with_face_data(self, user_id, name, phone, email, password, points, face_vector, images_zip=None):
+    def save_customer_with_face_data(self, user_id, name, phone, email, password, points, face_vector, images_zip=None, is_synced_value=0):
         """
         Lưu khách mới hoặc cập nhật khách cũ cùng vector, ảnh ZIP, password và points vào DB.
         """
@@ -711,7 +701,7 @@ class LocalDatabaseManager:
                 sql = """
                     INSERT OR REPLACE INTO customers 
                     (user_id, full_name, phone_number, email, password, points, face_vector, offline_images_zip, is_synced, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET
                         full_name = excluded.full_name,
                         phone_number = excluded.phone_number,
@@ -720,9 +710,10 @@ class LocalDatabaseManager:
                         points = excluded.points,
                         face_vector = excluded.face_vector,
                         offline_images_zip = COALESCE(excluded.offline_images_zip, customers.offline_images_zip),
-                        is_synced = 0
+                        is_synced = excluded.is_synced
                 """
-                con.execute(sql, (user_id, name, phone, email, password, points, face_vector, images_zip, created_at))
+                # Thay số 0 cứng bằng biến is_synced_value
+                con.execute(sql, (user_id, name, phone, email, password, points, face_vector, images_zip, is_synced_value, created_at))
                 con.commit()
             logging.info(f"Đã lưu thành công face data, password và points ({points}) cho khách hàng: {name}")
             return True
@@ -740,15 +731,12 @@ class LocalDatabaseManager:
             return []
     def get_unsynced_customers(self):
         """
-        Trả về danh sách khách có is_synced = 0.
-        Theo thiết kế, ưu tiên lọc những người bị mắc kẹt file ZIP.
+        Trả về danh sách khách có is_synced = 0 (Bao gồm cả người có và không có khuôn mặt).
         """
         try:
             with self._get_connection() as con:
-                # Ghi chú: Nếu hệ thống có cả đăng ký bằng Password, bạn có thể cân nhắc bỏ điều kiện 'AND offline_images_zip IS NOT NULL'
-                customers = con.execute(
-                    "SELECT * FROM customers WHERE is_synced = 0 AND offline_images_zip IS NOT NULL"
-                ).fetchall()
+                # Đã bỏ AND offline_images_zip IS NOT NULL để quét toàn bộ
+                customers = con.execute("SELECT * FROM customers WHERE is_synced = 0").fetchall()
                 return customers
         except sqlite3.Error as e:
             logging.error(f"Lỗi khi lấy danh sách khách hàng chưa đồng bộ: {e}")
@@ -864,7 +852,8 @@ class LocalDatabaseManager:
                                 password=u.get('password', ''),
                                 points=u.get('points', 0),
                                 face_vector=face_vector_blob,
-                                images_zip=None
+                                images_zip=None,
+                                is_synced_value=1 
                             )
                             has_changes = True
                             
@@ -882,7 +871,7 @@ class LocalDatabaseManager:
                     
                     # Nạp lại RAM (FAISS) nếu có dữ liệu thay đổi
                     if face_handler:
-                        logging.info("🔄 [FAISS] Đang làm mới In-Memory RAM để nhận diện khách mới...")
+                        logging.info("[FAISS] Đang làm mới In-Memory RAM để nhận diện khách mới...")
                         face_handler.reload_cache()
             else:
                 logging.error(f"[SYNC] Lỗi HTTP {response.status_code} khi gọi API Delta Sync.")
