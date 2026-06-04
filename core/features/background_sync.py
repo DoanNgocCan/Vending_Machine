@@ -71,7 +71,9 @@ class BackgroundSyncManager:
 
         for row in unsynced_customers:
             try:
-                customer = dict(row)                
+                # Ép kiểu sqlite3.Row sang dict để sử dụng được hàm .get() một cách an toàn
+                customer = dict(row)
+                
                 user_id = customer['user_id']
                 name = customer['full_name']
                 phone = customer['phone_number']
@@ -80,31 +82,17 @@ class BackgroundSyncManager:
                 points = customer.get('points', 0)
                 
                 face_vector_blob = customer['face_vector']
-                images_zip_bytes = customer.get('offline_images_zip') # Dùng get cho an toàn luôn
+                images_zip_bytes = customer.get('offline_images_zip')
 
                 if not images_zip_bytes or not face_vector_blob:
-                    # XỬ LÝ NHỮNG TÀI KHOẢN KHÔNG CÓ ẢNH (Profile Text, Password)
-                    print(f"  -> Đang gửi bù Profile Text: ID={user_id}, Tên={name}...")
-                    try:
-                        profile_payload = {
-                            "user_id": user_id,
-                            "full_name": name,
-                            "phone_number": phone,
-                            "email": email,
-                            "password": password
-                        }
-                        # Gọi API sync_profile đã có sẵn trên Server
-                        res = requests.post(f"{SERVER_URL}/api/user/sync_profile", json=profile_payload, timeout=10)
-                        
-                        if res.status_code == 200:
-                            db_manager.update_sync_status(user_id, 1)
-                            print(f"Đồng bộ Profile Text thành công cho {user_id}")
-                        else:
-                            print(f"Lỗi từ Server khi đồng bộ Profile {user_id}: {res.text}")
-                    except Exception as e:
-                        print(f"Lỗi kết nối khi đồng bộ Profile {user_id}: {e}")
-                        
-                    continue # Bỏ qua luồng upload ảnh bên dưới đối với tài khoản này
+                    continue  
+
+                try:
+                    # Logic giải mã nhị phân chuẩn xác của bạn
+                    face_vector = pickle.loads(face_vector_blob)
+                except Exception as e:
+                    logging.error(f"BACKGROUND_SYNC: Không thể giải mã mảng numpy vector cho {user_id}: {e}")
+                    continue
 
                 print(f"  -> Đang gửi bù: ID={user_id}, Tên={name}, Mật khẩu=[Đã mã hóa], Điểm={points}...")
 
@@ -128,7 +116,9 @@ class BackgroundSyncManager:
                     print(f"Đồng bộ ngầm thất bại cho khách {user_id} ({error_msg}). Sẽ thử lại ở chu kỳ kế tiếp.")
 
             except Exception as e:
-                logging.error(f"BACKGROUND_SYNC: Lỗi nghiêm trọng xảy ra trong vòng lặp đồng bộ khách {row['user_id']}: {e}")
+                # Lấy user_id an toàn trong khối except
+                failed_id = row['user_id'] if 'user_id' in row.keys() else 'Unknown'
+                logging.error(f"BACKGROUND_SYNC: Lỗi nghiêm trọng xảy ra trong vòng lặp đồng bộ khách {failed_id}: {e}")
 
     def sync_now(self):
         self._is_syncing = True
