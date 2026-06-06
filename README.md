@@ -1,13 +1,28 @@
 # Smart Vending Machine with AI Face Recognition
 
-Python-based smart vending machine for kiosk/touchscreen use, integrated with:
-- Face recognition login/register flow
-- Local-first inventory and transaction storage (SQLite)
-- Background sync with server API
-- MQTT hot updates for product data
-- QR payment flow via PayOS
+An intelligent kiosk system for unattended retail/vending scenarios, featuring secure AI-powered face recognition, local inventory management, and seamless PayOS payment integration.
 
-## Security Notice
+## ✨ Key Features
+
+- **🔐 Face Recognition & Anti-Spoofing**: Secure user authentication with liveness detection to prevent fraud
+- **🛒 Product Management**: Real-time inventory tracking with SQLite local database
+- **💳 PayOS Integration**: QR-based payment flow for frictionless transactions
+- **🔄 Cloud Sync**: Automatic background synchronization with backend server
+- **📡 MQTT Updates**: Hot product updates via MQTT for dynamic content
+- **🖥️ Touchscreen UI**: Modern PyQt5-based interface optimized for kiosk displays
+- **📦 Edge Processing**: Minimal server dependency with local-first architecture
+
+## 📹 Demo Video
+
+Watch the Smart Vending Machine in action on YouTube:
+
+[![Smart Vending Machine Demo](https://img.youtube.com/vi/K2tN-iw6_mU/0.jpg)](https://youtu.be/K2tN-iw6_mU?si=gx9MyUp3LhOzg25s)
+
+**▶️ [Click to watch demo on YouTube](https://youtu.be/K2tN-iw6_mU?si=gx9MyUp3LhOzg25s)**
+
+---
+
+## 🔒 Security Notice
 This project uses environment variables for sensitive/runtime values.
 - Real secrets must stay in `.env` (already ignored by `.gitignore`).
 - Use `.env.example` as a template for new deployments.
