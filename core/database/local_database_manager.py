@@ -136,6 +136,8 @@ class LocalDatabaseManager:
             return False
         
     def register_customer(self, name, phone, email, password, face_vector=None): 
+        if not email:
+            email = None
         try:
             with self._get_connection() as con:
                 cur = con.cursor()
@@ -695,6 +697,8 @@ class LocalDatabaseManager:
         """
         Lưu khách mới hoặc cập nhật khách cũ cùng vector, ảnh ZIP, password và points vào DB.
         """
+        if not email:
+            email = None
         created_at = datetime.now().isoformat()
         try:
             with self._get_connection() as con:

@@ -175,6 +175,7 @@ class AdvancedUIManager:
         """
         Hiển thị màn hình xác nhận (được gọi bởi on_ok_handler).
         """
+        self._hide_keyboard()
         ConfirmationScreen(self.root, self)
         self.root.withdraw()
 
@@ -734,6 +735,7 @@ class AdvancedUIManager:
             self.status_message_var.set("Giỏ hàng trống!")
             self.root.after(3000, lambda: self.status_message_var.set("Chọn sản phẩm để mua hàng"))
             return
+        self._hide_keyboard()
         self._show_confirmation_screen()
 
     def on_clear_cart_handler(self):

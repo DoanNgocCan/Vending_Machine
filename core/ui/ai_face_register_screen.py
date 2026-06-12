@@ -32,7 +32,7 @@ class AIFaceRegistrationScreen(tk.Toplevel):
         self.overrideredirect(True)
         self.configure(bg="white")
         self.lift()
-        self.focus_force()
+        #self.focus_force()
 
         self.camera_label = tk.Label(self, bg="white")
         self.camera_label.pack(expand=True, fill="both")
@@ -45,7 +45,14 @@ class AIFaceRegistrationScreen(tk.Toplevel):
         
         self.progress_bar = ctk.CTkProgressBar(self, orientation="horizontal", width=400, height=20, progress_color="#027cf0")
         self.progress_bar.set(0)
-        self.progress_bar.place(relx=0.5, rely=0.15, anchor="center")
+        #self.progress_bar.place(relx=0.5, rely=0.15, anchor="center")
+        self.current_progress = 0.0
+        self.current_border_color = (145, 75, 1)
+
+        self.target_progress = 0.0 # Biến đích để chạy từ từ tới
+        self.current_message = ""
+        self.current_error = False
+
 
         cancel_button = ctk.CTkButton(
             self, text="Hủy", font=("Arial", 18, "bold"),
@@ -65,18 +72,115 @@ class AIFaceRegistrationScreen(tk.Toplevel):
         self.registration_thread.start()
 
     def _camera_preview_loop(self):
-        """Vòng lặp này CHỈ hiển thị camera, không tính toán."""
-        if not self._register_capture_running or not self.winfo_exists():
+        is_running = getattr(self, '_recognition_capture_running', getattr(self, '_register_capture_running', False))
+            
+        if not is_running or not self.winfo_exists():
             return
+
+        # ==========================================
+        # 1. LOGIC TĂNG TỪ TỪ TIẾN TRÌNH VÀ SỐ %
+        # ==========================================
+        target = getattr(self, 'target_progress', 0.0)
+        current = getattr(self, 'current_progress', 0.0)
+        
+        if current < target:
+            # Để đăng ký thu 100 ảnh chạy kịp, có thể cần tăng tốc độ lên một xíu
+            current += 0.02 
+            if current > target:
+                current = target
+            self.current_progress = current
+            self.progress_bar.set(current)
+            
+        # ==========================================
+        # 2. CẬP NHẬT LABEL MƯỢT MÀ THEO %
+        # ==========================================
+        percent = int(self.current_progress * 100)
+        msg = getattr(self, 'current_message', "")
+        err = getattr(self, 'current_error', False)
+        
+        color = "#014b91"
+        if err:
+            color = "red"
+            self.current_border_color = (0, 0, 220)
+            display_text = msg
+        elif "thành công" in msg.lower():
+            color = "#00aa00"
+            self.current_border_color = (0, 170, 0)
+            display_text = msg
+            self.current_progress = 1.0 # Ép đầy thanh
+            self.progress_bar.set(1.0)
+            percent = 100
+        elif "Lỗi" in msg or "Không tìm thấy" in msg:
+            color = "#ffaa00"
+            self.current_border_color = (0, 140, 255)
+            display_text = msg
+        else:
+            # CHÈN LỜI HƯỚNG DẪN + BỘ ĐẾM % MƯỢT
+            if msg == "CAPTURING":
+                guidance = self._get_guidance_message(self.current_progress)
+                display_text = f"{guidance} ({percent}%)"
+                color = "#00aa00"
+                self.current_border_color = (0, 170, 0)
+            else:
+                display_text = f"Đang thu thập dữ liệu... {percent}%"
+                self.current_border_color = (240, 124, 2)
+                
+        self.feedback_label.configure(text=display_text, text_color=color)
+        # ==========================================
+        # 3. LẤY FRAME VÀ VẼ OVAL CAMERA
+        # ==========================================
+
         frame_bgr = self.ai_system.get_latest_frame_for_display()
+
         if frame_bgr is not None:
-            frame_display = cv2.resize(frame_bgr, (640, 480))
-            frame_rgb = cv2.cvtColor(frame_display, cv2.COLOR_BGR2RGB)
+            # Resize chuẩn
+            target_w, target_h = 960, 720
+            frame_display = cv2.resize(frame_bgr, (target_w, target_h))
+
+            # 1. TỌA ĐỘ VÀ KÍCH THƯỚC OVAL KHUÔN MẶT
+            center = (target_w // 2, target_h // 2)
+            axes = (285, 345)  
+
+            # 2. TẠO MASK OVAL
+            mask = np.zeros((target_h, target_w), dtype=np.uint8)
+            cv2.ellipse(mask, center, axes, 0, 0, 360, 255, -1)
+            masked_frame = cv2.bitwise_and(frame_display, frame_display, mask=mask)
+
+            # 3. TẠO NỀN TRẮNG ĐỤC LỖ OVAL
+            bg_color = np.full((target_h, target_w, 3), 255, dtype=np.uint8)
+            mask_inv = cv2.bitwise_not(mask)
+            bg_cutout = cv2.bitwise_and(bg_color, bg_color, mask=mask_inv)
+            final_frame = cv2.add(masked_frame, bg_cutout)
+
+            # 4. VẼ THANH TIẾN TRÌNH BAO QUANH OVAL
+            progress = getattr(self, 'current_progress', 0.0)
+            active_color = getattr(self, 'current_border_color', (250, 206, 135))
+            
+            # Vẽ một viền Track (màu xám nhạt) làm nền để thấy rõ hình oval
+            track_color = (230, 230, 230) 
+            cv2.ellipse(final_frame, center, axes, 0, 0, 360, track_color, 4)
+
+            # Vẽ tiến trình nếu progress > 0
+            if progress > 0:
+                # Góc quét tối đa mỗi bên là 180 độ
+                angle_covered = int(180 * progress)
+                
+                # Nhánh TRÁI (Bên trái khuôn mặt): 
+                # Xuất phát từ 6 giờ (90 độ) chạy thuận chiều kim đồng hồ lên 12 giờ
+                cv2.ellipse(final_frame, center, axes, 0, 90, 90 + angle_covered, active_color, 8)
+                
+                # Nhánh PHẢI (Bên phải khuôn mặt):
+                # Xuất phát từ 6 giờ (90 độ) chạy ngược chiều kim đồng hồ lên 12 giờ
+                cv2.ellipse(final_frame, center, axes, 0, 90 - angle_covered, 90, active_color, 8)
+
+            # 5. RENDER LÊN GIAO DIỆN TKINTER
+            frame_rgb = cv2.cvtColor(final_frame, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(frame_rgb)
             imgtk = ImageTk.PhotoImage(image=img)
             self.camera_label.imgtk = imgtk
             self.camera_label.configure(image=imgtk)
-        self.after(33, self._camera_preview_loop)
+
+        self.after(33, self._camera_preview_loop) # Chạy ở mức ~30fps
 
     # === CÁC HÀM CẬP NHẬT UI (Callback) ===
     def _schedule_update_progress(self, count, total, message, error=False):
@@ -86,28 +190,15 @@ class AIFaceRegistrationScreen(tk.Toplevel):
         if not self.winfo_exists(): 
             return
         
-        # Tính phần trăm
+        # 1. Lưu CỘT MỐC tiến trình (không cập nhật giao diện trực tiếp)
         if total > 0:
-            progress_value = count / total
+            self.target_progress = count / total
         else:
-            progress_value = 0
+            self.target_progress = 0
             
-        self.progress_bar.set(progress_value)
-        
-        display_text = message
-        color = "#014b91"
-
-        if error:
-            color = "red"
-        # Nếu library gửi tín hiệu đang chụp (CAPTURING), UI sẽ tự quyết định câu nhắc
-        elif message == "CAPTURING":
-            display_text = self._get_guidance_message(progress_value)
-            color = "#007acc" # Màu xanh dương đậm hơn chút cho hướng dẫn
-        elif "Lỗi" in message or "Không tìm thấy" in message:
-            color = "#ffaa00" # Màu cam cảnh báo
-
-        self.feedback_label.configure(text=display_text, text_color=color)
-
+        # 2. Lưu trạng thái lời nhắn
+        self.current_message = message
+        self.current_error = error
     def _get_guidance_message(self, progress_percent):
         """
         Trả về hướng dẫn hành động dựa trên % tiến độ chụp.
@@ -151,7 +242,6 @@ class AIFaceRegistrationScreen(tk.Toplevel):
         
         if self._register_capture_running and self.winfo_exists():
             self.after(0, self._on_registration_finished, reg_data)
-
     def _on_registration_finished(self, reg_data):
         """(CHẠY TRÊN LUỒNG UI)"""
         self.controller.stop_camera_service()

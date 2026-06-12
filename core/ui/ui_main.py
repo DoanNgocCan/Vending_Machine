@@ -161,11 +161,15 @@ class MainView:
         cart_container.pack_propagate(False)
         
         # 3. Widget Text (Đã bỏ viền, nền trắng cho đồng bộ)
+        # 3. Widget Text
         self.selected_items_display = tk.Text(
             cart_container, height=10, width=30, font=("Arial", 23), 
-            wrap=tk.WORD, bd=0, relief=tk.FLAT, bg="white", highlightthickness=0
-        )
+            wrap=tk.WORD, bd=0, relief=tk.FLAT, bg="white", highlightthickness=0,
+            takefocus=0)
         self.selected_items_display.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        self.selected_items_display.bind("<Button-1>", lambda e: self.controller._hide_keyboard())
+        self.selected_items_display.bind("<FocusIn>", lambda e: self.controller._hide_keyboard())
         
         # Cập nhật hiển thị giỏ hàng lần đầu (nếu có dữ liệu cũ)
         self.controller.update_cart_display_handler()

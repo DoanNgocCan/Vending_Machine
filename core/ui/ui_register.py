@@ -46,12 +46,6 @@ class RegisterScreen(tk.Toplevel):
         self.phone_entry = ctk.CTkEntry(form_frame, font=("Arial", 18), height=48, corner_radius=15, border_width=2, border_color="#014b91", fg_color="white", text_color="black", placeholder_text="Nhập SĐT 10 số", placeholder_text_color="gray")
         self.phone_entry.pack(fill="x", pady=(5, 15))
 
-        # Đổi Ngày sinh thành Email
-        email_label = ctk.CTkLabel(form_frame, text="Email", font=("Arial", 16), text_color="black")
-        email_label.pack(anchor="w", padx=5)
-        self.email_entry = ctk.CTkEntry(form_frame, font=("Arial", 18), height=48, corner_radius=15, border_width=2, border_color="#014b91", fg_color="white", text_color="black", placeholder_text="vidu@gmail.com", placeholder_text_color="gray")
-        self.email_entry.pack(fill="x", pady=(5, 15))
-
         password_label = ctk.CTkLabel(form_frame, text="Mật khẩu", font=("Arial", 16), text_color="black")
         password_label.pack(anchor="w", padx=5)
         password_frame = ctk.CTkFrame(form_frame, fg_color="transparent")
@@ -70,8 +64,8 @@ class RegisterScreen(tk.Toplevel):
         self.confirm_password_entry.pack(fill="x", pady=(5, 10))
 
         # Cập nhật danh sách input_widgets
-        self.input_widgets = [self.name_entry, self.phone_entry, self.email_entry, self.password_entry, self.confirm_password_entry]
-        background_widgets = [self, content_frame, form_frame, name_label, phone_label, email_label, password_label, confirm_password_label]
+        self.input_widgets = [self.name_entry, self.phone_entry, self.password_entry, self.confirm_password_entry]
+        background_widgets = [self, content_frame, form_frame, name_label, phone_label, password_label, confirm_password_label]
         
         for widget in self.input_widgets:
             widget.bind("<FocusIn>", self.controller._handle_focus_in)
@@ -124,12 +118,15 @@ class RegisterScreen(tk.Toplevel):
         self.controller._hide_keyboard() 
         name = self.name_entry.get().strip()
         phone = self.phone_entry.get().strip()
-        email = self.email_entry.get().strip()
+        
+        # Mặc định gán email là chuỗi rỗng vì đã bỏ ô nhập
+        email = "" 
+        
         password = self.password_entry.get().strip()
         confirm_password = self.confirm_password_entry.get().strip()
 
-        # Kiểm tra nhập đủ
-        if not name or not phone or not email or not password or not confirm_password:
+        # Kiểm tra nhập đủ (Bỏ email khỏi lệnh check)
+        if not name or not phone or not password or not confirm_password:
             self.message_var.set("Vui lòng nhập đầy đủ thông tin.")
             return
         
@@ -139,12 +136,6 @@ class RegisterScreen(tk.Toplevel):
             
         if not phone.isdigit() or not (len(phone) == 10):
             self.message_var.set("Số điện thoại phải có 10 chữ số.")
-            return
-            
-        # Kiểm tra định dạng Email
-        if not re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", email):
-            self.message_var.set("Email không đúng định dạng.")
-            self.email_entry.focus()
             return
 
         if len(password) < 6:
@@ -158,19 +149,18 @@ class RegisterScreen(tk.Toplevel):
             self.confirm_password_entry.focus()
             return
         
-        # --- BỔ SUNG KIỂM TRA CHECKBOX ĐỒNG Ý ---
         if not self.consent_var.get():
             self.message_var.set("Vui lòng đồng ý cung cấp dữ liệu khuôn mặt để tiếp tục.")
             return
         
         print("[REGISTER_UI] Dữ liệu hợp lệ. Đang đăng ký vào DB local...")
         
-        # Truyền email vào db_manager (đã sửa ở bước trước)
+        # Vẫn truyền biến email (đang là "") để giữ nguyên cấu trúc hàm cũ
         result = self.controller.db_manager.register_customer(name, phone, email, password, face_vector=None)
         
         if "error" in result:
             if result["error"] == "duplicate_phone_or_email":
-                self.message_var.set("Lỗi: Số điện thoại hoặc Email này đã tồn tại.")
+                self.message_var.set("Lỗi: Số điện thoại này đã tồn tại.")
             else:
                 self.message_var.set(f"Lỗi CSDL: {result['error']}")
             return
@@ -180,14 +170,8 @@ class RegisterScreen(tk.Toplevel):
 
         self.withdraw()
         
-        # Cập nhật lời gọi API sang màn hình chụp ảnh, truyền email thay vì dob
         self.controller.show_face_capture_screen(
-            local_user_id,
-            name,
-            phone,
-            email,
-            password,
-            self
+            local_user_id, name, phone, email, password, self
         )
 
     def _cancel_and_hide_keyboard(self):

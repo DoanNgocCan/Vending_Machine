@@ -135,9 +135,18 @@ class LoginScreen(tk.Toplevel):
     def _verify_with_server_task(self, user_data):
         print(f"VERIFY: Đối chiếu thông tin user {user_data['name']} với server...")
         server_data = self.controller.api_manager.get_customer_by_id(user_data['code'])
-        if server_data is None:
+        
+        # 1. Nếu hàm API trả về chuỗi báo mất mạng -> Bỏ qua ngay
+        if server_data == "NETWORK_ERROR":
+            print(f"VERIFY-WARN: Mất mạng! Bỏ qua đối chiếu server cho user {user_data['code']} để tránh lỗi trạng thái.")
+            return
+            
+        # 2. Nếu server trả về 404 hoặc None -> Đánh dấu cần đồng bộ lại
+        elif server_data == "NOT_FOUND" or server_data is None:
             print(f"VERIFY-WARN: User {user_data['code']} tồn tại ở local nhưng không có trên server!")
             self.controller.db_manager.mark_customer_as_unsynced(user_data['code'])
+            
+        # 3. Nếu mọi thứ bình thường -> Cập nhật dữ liệu
         else:
             print("VERIFY: Thông tin user trên server khớp với local.")
             self.controller.db_manager.add_or_update_customer_from_server(server_data)

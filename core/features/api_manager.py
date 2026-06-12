@@ -104,9 +104,13 @@ class VendingAPIManager:
                 data = response.json()
                 if data.get("success"):
                     return data.get('user')
+            elif response.status_code == 404:
+                # Trả về cờ hiệu nhận biết Server thực sự không có user này
+                return "NOT_FOUND" 
             return None
         except requests.RequestException:
-            return None
+            # Trả về cờ hiệu nhận biết mất mạng thay vì trả về None
+            return "NETWORK_ERROR"
     def ping_server_to_register(self):
         """Chủ động gọi Server 1 lần đầu tiên để Server ghi nhớ X-Device-ID."""
         endpoint = f"{SERVER_URL}/"  # Gọi vào route '/' mặc định của Server

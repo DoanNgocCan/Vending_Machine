@@ -19,6 +19,7 @@ class ConfirmationScreen(tk.Toplevel):
         super().__init__(parent)
         self.controller = controller
         self.controller.stop_camera_service()
+        self.controller._hide_keyboard()
         
         self.title("Xác nhận đơn hàng")
         screen_width = self.winfo_screenwidth()
