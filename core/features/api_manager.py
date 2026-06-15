@@ -205,7 +205,7 @@ class VendingAPIManager:
             'user_id': user_id,
             'name': name,
             'phone': phone,
-            'email': email,
+            'email': "" if email is None else email,
             'password': password,  
             'points': int(points),
             'device_id': DEVICE_ID
