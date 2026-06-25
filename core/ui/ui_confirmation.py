@@ -264,7 +264,7 @@ class ConfirmationScreen(tk.Toplevel):
             if not payment_link: raise ValueError("Không nhận được link thanh toán.")
             
             self.controller._open_browser_kiosk_mode(payment_link)
-            time.sleep(2)
+            time.sleep(3)
             self.destroy() 
             return
             
@@ -274,5 +274,7 @@ class ConfirmationScreen(tk.Toplevel):
             self.back_btn.configure(state="normal")
 
     def _back_to_main(self):
+        if len(self.controller.logic.cart) == 1:
+            self.controller.on_clear_cart_handler()
         self.controller.root.deiconify()
         self.destroy()

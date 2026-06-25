@@ -25,6 +25,11 @@ def check_payment_queue(root, ui, shopping_logic, flask_to_tkinter_queue):
             
         elif message == "cancel":
             logging.info("PAYMENT_HANDLER: Nhận được tín hiệu thanh toán BỊ HỦY.")
+            if len(shopping_logic.cart) == 1:
+                if hasattr(ui, 'controller'):
+                    ui.controller.on_clear_cart_handler()
+                elif hasattr(ui, 'on_clear_cart_handler'):
+                    ui.on_clear_cart_handler()
             # Chỉ cần hiện lại màn hình chính
             if ui.root and ui.root.winfo_exists():
                 ui.root.deiconify()

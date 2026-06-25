@@ -540,7 +540,7 @@ class MainView:
             self.recommendation_overlay.destroy()
 
     def accept_recommendation(self, slot, name, qty):
-        """Khách bấm CÓ -> Tự tra cứu giá mới nhất và đưa vào giỏ hàng"""
+        """Khách bấm CÓ -> Chọn nhanh sản phẩm rồi đi thẳng vào luồng thanh toán."""
         self.close_recommendation_popup()
         
         # LẤY GIÁ MỚI NHẤT TỪ KHO CỤC BỘ (Source of Truth)
@@ -560,9 +560,10 @@ class MainView:
         self.controller.on_product_select(product_tuple, None)
         
         # 2. Đồng bộ số lượng từ Popup
-        self.controller.selected_quantity = qty
-        self.controller.quantity_var.set(str(qty))
+        safe_qty = min(qty, max(1, self.controller.max_available_quantity))
+        self.controller.selected_quantity = safe_qty
+        self.controller.quantity_var.set(str(safe_qty))
         
-        # 3. Kích hoạt lệnh thêm vào giỏ
-        self.controller.on_confirm_add()
-        print(f"[UI] Đã thêm {qty} {latest_name} vào giỏ với giá mới nhất: {latest_price:,}đ")
+        # 3. Kích hoạt cùng luồng với nút THANH TOÁN
+        self.controller.on_ok_handler()
+        print(f"[UI] MUA LUÔN: đã chọn {safe_qty} {latest_name} và chuyển sang xác nhận thanh toán.")

@@ -570,7 +570,7 @@ class AdvancedUIManager:
         
         if available_stock > 0:
             self.selected_quantity = 1
-            self.status_message_var.set(f"Đã chọn: {name} - {price:,}đ (Còn lại: {available_stock})")
+            self.status_message_var.set(f"Đã chọn: {name} - {int(price):,}đ (Còn lại: {available_stock})")
         else:
             self.selected_quantity = 0
             if real_stock > 0:
@@ -730,7 +730,8 @@ class AdvancedUIManager:
 
     def on_ok_handler(self):
         """Nút THANH TOÁN"""
-        # [SỬA] Kiểm tra self.logic.cart
+        if self.selected_product:
+            self.on_confirm_add()
         if not self.logic.cart:
             self.status_message_var.set("Giỏ hàng trống!")
             self.root.after(3000, lambda: self.status_message_var.set("Chọn sản phẩm để mua hàng"))

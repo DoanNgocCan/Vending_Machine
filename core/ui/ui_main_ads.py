@@ -1,7 +1,39 @@
 import random
 from datetime import datetime
-
 def _get_product_context(recommended_name):
+    """
+    Phân loại chính xác 11 sản phẩm cố định trên server 
+    để lấy đơn vị, hành động và tính từ phù hợp.
+    """
+    lower_name = recommended_name.lower().strip()
+    
+    # Từ điển ánh xạ chính xác các sản phẩm đang có trong database
+    # Cấu trúc: "từ khóa nhận diện": ("đơn vị", "hành động", "tính từ")
+    product_dict = {
+        # --- NHÓM NƯỚC ---
+        "aquafina": ("chai", "giải khát", "thanh mát"),
+        "pepsi": ("lon", "uống", "sảng khoái"),
+        "sting đỏ": ("chai", "nạp năng lượng", "bùng nổ"), # Nếu máy bạn bán Sting lon thì sửa "chai" thành "lon" nhé
+        "milo": ("lon", "thưởng thức", "đậm đà"),
+        
+        # --- NHÓM SNACK & ĐỒ ĂN VẶT ---
+        "rong biển": ("gói", "nhâm nhi", "giòn rụm"),
+        "hành": ("gói", "nhâm nhi", "thơm lừng"),       # Cho Snack Hành
+        "tôm cay": ("gói", "lót dạ", "cay cay đậm vị"), # Cho Snack Tôm Cay
+        "bắp ngọt": ("gói", "nhâm nhi", "ngọt ngào"),   # Cho Snack Bắp Ngọt
+        "bánh quy": ("gói", "lót dạ", "giòn tan"),
+        "kẹo dẻo": ("gói", "thưởng thức", "ngọt ngào")
+    }
+    
+    # Dò tìm tên sản phẩm trong từ điển
+    for key, context in product_dict.items():
+        if key in lower_name:
+            return context # Trả về (don_vi, hanh_dong, tinh_tu)
+            
+    # Trường hợp dự phòng (fallback) cho sản phẩm thứ 11 
+    # hoặc tên sản phẩm bị gõ sai lệch so với từ khóa
+    return "phần", "thưởng thức", "tuyệt vời"
+'''def _get_product_context(recommended_name):
     """Phân loại sản phẩm thông minh để lấy đơn vị, hành động và tính từ"""
     lower_name = recommended_name.lower()
     
@@ -23,7 +55,7 @@ def _get_product_context(recommended_name):
         hanh_dong = "thưởng thức"
         tinh_tu = "tuyệt vời"
         
-    return don_vi, hanh_dong, tinh_tu
+    return don_vi, hanh_dong, tinh_tu '''
 
 def generate_recommendation_messages(user_name, recommended_name):
     """Trả về câu chào và câu gợi ý dựa theo khung giờ thực tế"""
@@ -63,7 +95,7 @@ def generate_recommendation_messages(user_name, recommended_name):
         greetings = [
             f"Nghỉ giải lao giữa buổi một chút nhé {user_name}!",
             f"Làm việc từ sáng căng thẳng rồi, kiếm gì {hanh_dong} thôi.",
-            f"Nạp thêm chút đường để não bộ hoạt động hết công suất nào {user_name} ơi.",
+            f"Nạp thêm chút năng lượng để cơ thể hoạt động hết công suất nào {user_name} ơi.",
             f"Còn một chút nữa là đến trưa rồi, duy trì phong độ nhé {user_name}."
         ]
     elif 11 <= hour < 12:
@@ -96,14 +128,14 @@ def generate_recommendation_messages(user_name, recommended_name):
         ]
     elif 16 <= hour < 18:
         greetings = [
-            f"Sắp tan tầm rồi! Cố gắng chút nữa thôi {user_name}. 🌇",
+            f"Sắp tan tầm rồi! Cố gắng chút nữa thôi {user_name}.",
             f"Năng lượng cạn kiệt cuối ngày rồi, sạc lại gấp nào.",
             f"Hoàn thành nốt công việc rồi chuẩn bị về nhà thôi {user_name}.",
             f"Chút xíu nữa là được nghỉ rồi, {user_name} giữ phong độ nhé."
         ]
     elif 18 <= hour < 19:
         greetings = [
-            f"Hoàng hôn buông rồi, vừa tan ca đúng không {user_name}? 🌆",
+            f"Hoàng hôn buông rồi, vừa tan ca đúng không {user_name}?",
             f"Một ngày dài đã qua, xả stress với món đồ yêu thích nhé {user_name}!",
             f"Trời vừa sập tối, {user_name} nhớ lót dạ gì đó nha.",
             f"Chào buổi tối! {user_name} ghé máy là chuẩn bài luôn."
