@@ -134,8 +134,8 @@ class AIFaceRegistrationScreen(tk.Toplevel):
 
         if frame_bgr is not None:
             # Resize chuẩn
-            target_w, target_h = 960, 720
-            frame_display = cv2.resize(frame_bgr, (target_w, target_h))
+            target_w, target_h = 1280, 720
+            frame_display = frame_bgr
 
             # 1. TỌA ĐỘ VÀ KÍCH THƯỚC OVAL KHUÔN MẶT
             center = (target_w // 2, target_h // 2)

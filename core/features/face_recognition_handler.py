@@ -117,7 +117,26 @@ class FaceRecognitionHandler:
 
             if self.cap is None:
                 try:
-                    self.cap = cv2.VideoCapture(0)
+                    # Khởi tạo camera với backend V4L2 tối ưu cho Linux
+                    self.cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+
+                    # 1. Ép camera xuất luồng KHÔNG NÉN YUYV (YUY2) để đạt chất lượng ảnh cao nhất
+                    self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('Y', 'U', 'Y', 'V'))
+
+                    # 2. Yêu cầu phần cứng trả về kích thước HD (1280x720)
+                    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+                    # 3. Kiểm tra lại cấu hình thực tế từ driver phần cứng
+                    w = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                    h = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                    print(f"[FR_HANDLER] Độ phân giải phần cứng Webcam đang chạy: {int(w)}x{int(h)}")
+
+                    # 4. Kiểm tra xem hệ thống nhận diện đúng định dạng chưa
+                    fourcc = int(self.cap.get(cv2.CAP_PROP_FOURCC))
+                    codec = "".join([chr((fourcc >> 8 * i) & 0xFF) for i in range(4)])
+                    print(f"[FR_HANDLER] Định dạng ảnh hiện tại: {codec}") 
+
                     if not self.cap.isOpened():
                         self._camera_running = False
                         continue
@@ -128,13 +147,19 @@ class FaceRecognitionHandler:
             if self.cap is not None and self.cap.isOpened():
                 ret, frame = self.cap.read()
                 if ret:
+                    # 1. DÀNH CHO UI: Không cần resize, giữ nguyên 1280x720
+                    self.latest_frame_for_display = frame 
+
+                    # 2. DÀNH CHO AI: Ép nhỏ lại 640x480 để giảm tải cpu
+                    frame_ai = cv2.resize(frame, (640, 480))
+                    
                     if self.image_queue.full():
                         try:
                             self.image_queue.get_nowait()
                         except queue.Empty:
                             pass
-                    self.latest_frame_for_display = frame
-                    self.image_queue.put(frame)
+                    # AI chỉ nhận mảng nhỏ
+                    self.image_queue.put(frame_ai) 
                 time.sleep(0.01)
 
     def get_latest_frame_for_display(self):
@@ -167,29 +192,56 @@ class FaceRecognitionHandler:
     # -----------------------------------------------------------------
     # PIPELINE HELPERS
     # -----------------------------------------------------------------
-    def _is_frame_quality_good(self, frame_bgr):
-        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-        focus_val = cv2.Laplacian(gray, cv2.CV_64F).var()
-        brightness = gray.mean()
-        return (
+    def _check_face_quality(self, frame_bgr, bbox):
+        """
+        Cắt riêng vùng khuôn mặt để kiểm tra độ mờ và độ sáng.
+        Giảm 80-90% khối lượng tính toán so với làm trên toàn bộ khung hình.
+        """
+        h_img, w_img = frame_bgr.shape[:2]
+        x1, y1, x2, y2 = bbox
+        
+        # Đảm bảo tọa độ cắt không bị âm hoặc vượt lố ra ngoài ảnh
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w_img, x2), min(h_img, y2)
+
+        face_crop = frame_bgr[y1:y2, x1:x2]
+        
+        # Tránh lỗi chia cho 0 nếu mảng rỗng (cắt lỗi do sát viền)
+        if face_crop.size == 0:
+            return False, 0.0
+
+        # Chuyển xám và đo chất lượng CHỈ trên vùng mặt đã cắt
+        gray_face = cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY)
+        focus_val = cv2.Laplacian(gray_face, cv2.CV_64F).var()
+        brightness = gray_face.mean()
+
+        is_good = (
             focus_val >= BLUR_THRESHOLD
             and BRIGHTNESS_MIN <= brightness <= BRIGHTNESS_MAX
         )
+        
+        return is_good, focus_val
 
     def _extract_live_embedding(self, frame_bgr, require_quality=False):
-        if require_quality and not self._is_frame_quality_good(frame_bgr):
-            return None, False
-
+        # 1. TÌM KHUÔN MẶT TRƯỚC (MediaPipe cực nhanh, nên ưu tiên chạy đầu)
         detected_faces = self.detector.detect(frame_bgr)
         if not detected_faces:
             return None, False
 
         bbox, keypoints = detected_faces[0]
 
+        # 2. KIỂM TRA CHẤT LƯỢNG SAU KHI CÓ BBOX
+        if require_quality:
+            is_good, _ = self._check_face_quality(frame_bgr, bbox)
+            if not is_good:
+                return None, False  # Bỏ qua nếu mặt bị mờ/tối
+
+        # 3. KIỂM TRA GIẢ MẠO (LIVENESS)
         is_real, _ = self.liveness.check_liveness(frame_bgr, bbox)
         if not is_real:
             return None, True
 
+        # 4. ALIGN VÀ TRÍCH XUẤT ĐẶC TRƯNG
         aligned_face_bgr = align_face_112(frame_bgr, keypoints)
         if aligned_face_bgr is None:
             return None, False
@@ -390,9 +442,8 @@ class FaceRecognitionHandler:
                     )
                 continue
 
-            # 2. Kiểm tra độ sắc nét (Focus/Blur)
-            gray = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
-            focus_score = cv2.Laplacian(gray, cv2.CV_64F).var()
+            # 2. Kiểm tra độ sắc nét (Focus/Blur) CHỈ TRÊN MẶT
+            is_good, focus_score = self._check_face_quality(bgr_frame, bbox)
             if focus_score < BLUR_THRESHOLD:
                 continue # Bỏ qua ảnh mờ
 

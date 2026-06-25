@@ -185,8 +185,8 @@ class LivenessDetector:
         self.model_dir = os.path.join(MODULE_ROOT, model_dir)
         self.model_test = AntiSpoofPredict(device_id)
         self.image_cropper = CropImage()
-        self.models = [m for m in os.listdir(self.model_dir) if "MiniFASNet" in m]
-        print(f"[LIVENESS] Đã tải {len(self.models)} model chống giả mạo.")
+        self.models = ["2.7_80x80_MiniFASNetV2.pth"] 
+        print(f"[LIVENESS] Đã cấu hình chạy Anti-Spoofing: {self.models[0]}")
 
     def check_liveness(self, frame_bgr, bbox):
         h_img, w_img, _ = frame_bgr.shape
@@ -229,35 +229,45 @@ class LivenessDetector:
 def align_face_112(frame_bgr, keypoints):
     """
     Căn chỉnh (xoay + co giãn) khuôn mặt về 112x112
-    dựa trên 3 điểm mốc: 2 mắt và chóp mũi.
+    Sử dụng thuật toán Similarity Transform (không gây biến dạng Shearing) 
+    với 4 điểm mốc khả dụng từ MediaPipe.
     """
-
     try:
-        src_pts = np.array(
-            [
-                keypoints["right_eye"],
-                keypoints["left_eye"],
-                keypoints["nose_tip"],
-            ],
-            dtype=np.float32,
-        )
+        # 1. Khai báo 4 điểm nguồn từ MediaPipe
+        src_pts = np.array([
+            keypoints["right_eye"],   # Mắt (bên trái ảnh)
+            keypoints["left_eye"],    # Mắt (bên phải ảnh)
+            keypoints["nose_tip"],    # Chóp mũi
+            keypoints["mouth_center"] # Tâm miệng
+        ], dtype=np.float32)
 
-        dst_pts = np.array(
-            [
-                [38.2946, 51.6963],
-                [73.5318, 51.5014],
-                [56.0252, 71.7366],
-            ],
-            dtype=np.float32,
-        )
+        # 2. Khai báo tọa độ chuẩn (112x112) của các mô hình họ ArcFace/EdgeFace
+        # Lưu ý: Tọa độ gốc của ArcFace cho 2 mép miệng là:
+        # L_mouth = (41.5493, 92.3655), R_mouth = (70.7299, 92.2041)
+        # Tâm miệng sẽ là trung bình cộng của trục X.
+        mouth_center_x = (41.5493 + 70.7299) / 2.0
+        mouth_center_y = (92.3655 + 92.2041) / 2.0
+        
+        dst_pts = np.array([
+            [38.2946, 51.6963],              # Vị trí chuẩn mắt 1
+            [73.5318, 51.5014],              # Vị trí chuẩn mắt 2
+            [56.0252, 71.7366],              # Vị trí chuẩn chóp mũi
+            [mouth_center_x, mouth_center_y] # Vị trí chuẩn tâm miệng
+        ], dtype=np.float32)
 
-        matrix = cv2.getAffineTransform(src_pts, dst_pts)
+        # 3. Tính toán ma trận Similarity Transform (LMEDS giúp loại bỏ nhiễu/outliers)
+        matrix, _ = cv2.estimateAffinePartial2D(src_pts, dst_pts, method=cv2.LMEDS)
+
+        if matrix is None:
+            return None
+
+        # 4. Thực hiện Warp
         aligned_face = cv2.warpAffine(
             frame_bgr,
             matrix,
             (112, 112),
             borderMode=cv2.BORDER_CONSTANT,
-            borderValue=(0, 0, 0),
+            borderValue=(0, 0, 0)
         )
 
         return aligned_face
