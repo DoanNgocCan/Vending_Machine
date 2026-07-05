@@ -24,7 +24,7 @@ class AIFaceRegistrationScreen(tk.Toplevel):
         self.original_register_window = original_register_window
         
         self.ai_system = self.controller.camera_ai_system
-        self.num_images_target = 100 
+        self.num_images_target = 70
         self._register_capture_running = True # Cờ để hủy
 
         # --- (Code UI giữ nguyên) ---
@@ -84,8 +84,8 @@ class AIFaceRegistrationScreen(tk.Toplevel):
         current = getattr(self, 'current_progress', 0.0)
         
         if current < target:
-            # Để đăng ký thu 100 ảnh chạy kịp, có thể cần tăng tốc độ lên một xíu
-            current += 0.02 
+            # Để đăng ký thu 70 ảnh chạy kịp, có thể cần tăng tốc độ lên một xíu
+            current += 0.04 
             if current > target:
                 current = target
             self.current_progress = current

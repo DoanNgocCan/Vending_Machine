@@ -392,7 +392,7 @@ class FaceRecognitionHandler:
     def register_customer(
         self,
         customer_name,
-        num_frames_to_capture=100, # Chụp 100 frame
+        num_frames_to_capture=70, # Chụp 70 frame
         keep_best=50,              # Lọc lấy 50 frame tốt nhất
         progress_callback=None,
         stop_flag_check=None,
